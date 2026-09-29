@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    function render() {
+      // These lists describe the vocabulary actually present in the export.
+      const topTypes = (CLAIM_STATS_ALL.types || []).slice(0, 6).map((t) => t[0]).filter((t) => t !== '(Unclassified)');
+      const topDepts = (CLAIM_STATS_ALL.dept || []).slice(0, 8).map((d) => d[0]);
+      const settings = [
+        ['Claim Statuses', (CLAIM_STATS_ALL.status || []).map((s) => `${s[0]} (${num(s[1])})`).join(', ')],
+        ['Claim Types in use', `${num(DATA_QUALITY.distinctTypes)} distinct · top: ${topTypes.join(', ')}`],
+        ['Owning departments', `${num(DATA_QUALITY.distinctDepts)} distinct · top: ${topDepts.join(', ')}`],
+        ['Unclassified claims', `${num(DATA_QUALITY.blankType)} with no ClaimType, ${num(DATA_QUALITY.blankDept)} with no ClaimDept`]
+      ];
+
+      document.getElementById('app').innerHTML = `
+        <div class="row" style="margin-bottom:16px">
+          <div><h1>Admin</h1><span class="mu">User accounts and system configuration</span></div>
+        </div>
+        <div class="card">
+          <div class="row">
+            <h3>User Management</h3>
+            <div class="sp"></div>
+            <button class="btn p s" onclick="toast('Add user form')">+ Add User</button>
+          </div>
+          <div class="tw"><table>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Claims owned</th><th>Status</th><th>Actions</th></tr>
+            ${USERS.map((u) => {
+              const own = OWNERS.find((o) => o.name === u[0]);
+              const n = own ? OWNER_QUEUE.filter((q) => q.own === own.id).length : 0;
+              return `
+              <tr>
+                <td><b>${u[0]}</b></td>
+                <td>${u[1]}</td>
+                <td>${u[2]}</td>
+                <td>${own ? num(n) + ' open' : '<span class="mu">—</span>'}</td>
+                <td><span class="b ${u[3] === 'Inactive' ? 'Rejected' : ''}">${u[3]}</span></td>
+                <td>
+                  <button class="btn s" onclick="toast('Edit ${u[0]}')">Edit</button>
+                  <button class="btn s d" onclick="toast('${u[0]} deactivated')">${u[3] === 'Inactive' ? 'Reactivate' : 'Deactivate'}</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </table></div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>System Configuration</h3>
+          <div class="grid g4">
+            ${settings.map(([name, value]) => `
+              <div class="card">
+                <b>${name}</b>
+                <p class="mu" style="font-size:12px">${value}</p>
+                <button class="btn s" onclick="toast('Manage ${name}')">Manage</button>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAdmin()) return;
+      document.body.innerHTML = layout('admin');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

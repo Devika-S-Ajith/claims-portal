@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // esc / usd / num / pct all live in app.js.
+    const COLORS = ['#6366f1', '#3b82c4', '#e8a13a', '#7d4fc0', '#ef6c6c', '#b3a49b'];
+
+    let sortKey = 'queue';
+    let sortDir = -1;
+    let ownerFilter = '';
+    let queueOwner = '';
+    let queueReason = '';
+    let queueGroup = 'own';
+    let queueDept = '';
+
+    // How the open-case queue is grouped. Owner is the default because the
+    // admin's first question is always "who is sitting on what".
+    const GROUPINGS = {
+      own: { label: 'Owner', key: (r) => [r.own], text: (k) => ownerName(k) },
+      reason: { label: 'Flag', key: (r) => r.reasons, text: (k) => k, max: 12 },
+      de: { label: 'Department', key: (r) => [r.de], text: (k) => k, max: 14 },
+      ty: { label: 'Claim type', key: (r) => [r.ty], text: (k) => k, max: 12 }
+    };
+    const grouping = () => GROUPINGS[queueGroup] || GROUPINGS.own;
+
+    const add = (a) => a.reduce((s, x) => s + x, 0);
+
+    // OWNER_MATRIX carries the measured numbers but not the contact details, so
+    // the two are joined here. Without this the comparison table reads NaN,
+    // because OWNERS alone has no claim counts on it.
+    const managers = () => OWNERS
+      .filter((o) => o.role === 'Manager')
+      .map((o) => Object.assign({}, o, OWNER_MATRIX.find((m) => m.id === o.id) || {}));
+    // All-years aggregate for the routed owner.
+    const statsFor = (id) => CLAIM_STATS_BY_OWNER[id] || CLAIM_STATS_ALL;
+
+    // ---------- sorting ----------
+    const SORTS = {
+      name: (m) => m.name, total: (m) => m.total, credit: (m) => m.credit,
+      queue: (m) => m.queue, open: (m) => m.unresolved, unfinished: (m) => m.unfinished,
+      resolution: (m) => statsFor(m.id).resolved, depts: (m) => m.depts
+    };
+    function sortedManagers() {
+      const f = SORTS[sortKey] || SORTS.queue;
+      return managers().slice().sort((a, b) => {
+        const x = f(a), y = f(b);
+        return (typeof x === 'string' ? x.localeCompare(y) : x - y) * sortDir;
+      });
+    }
+    function th(key, label, extra) {
+      return `<th class="srt${sortKey === key ? ' on' : ''}" onclick="setSort('${key}')">${label}${
+        sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}${extra || ''}</th>`;
+    }
+    function setSort(k) {
+      if (sortKey === k) sortDir = -sortDir;
+      else { sortKey = k; sortDir = -1; }
+      render();
+    }
+
+    // ---------- owner comparison ----------
+    function managerRow(m) {
+      const s = statsFor(m.id);
+      const resRate = pct(s.resolved, s.total);
+      const load = m.total ? m.queue / m.total : 0;
+      return `
+        <tr>
+          <td><b>${esc(m.name)}</b><div class="mu" style="font-size:11px">${esc(m.email)}</div></td>
+          <td>${num(m.total)}</td>
+          <td>${usd(m.credit)}</td>
+          <td>${m.depts}</td>
+          <td>${num(s.resolved)}</td>
+          <td>${num(m.open)}</td>
+          <td>${num(m.unfinished)}</td>
+          <td>${num(m.queue)}</td>
+          <td>${resRate}</td>
+          <td class="loadcell">
+            <div class="trk" title="${num(m.queue)} of ${num(m.total)} claims still open">
+              <span style="width:${Math.min(100, load * 100 * 4).toFixed(1)}%;background:${load > 0.08 ? '#ef6c6c' : load > 0.03 ? '#e8a13a' : '#4b9c6c'}"></span>
+            </div>
+            <em>${pct(m.queue, m.total)}</em>
+          </td>
+        </tr>`;
+    }
+
+    // ---------- dept -> owner ----------
+    function deptRow(d) {
+      const s = statsFor(d.owner);
+      const owner = OWNERS.find((o) => o.id === d.owner) || {};
+      const open = OWNER_QUEUE.filter((q) => q.own === d.owner && q.de === d.dept).length;
+      return `
+        <tr>
+          <td><b>${esc(d.dept)}</b></td>
+          <td>${num(d.n)}</td>
+          <td>${pct(d.n, S_ALL.total)}</td>
+          <td>${num(open)}</td>
+          <td><span class="owner-chip ${owner.role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(owner.name || d.owner)}</span></td>
+          <td><button class="btn s" onclick="queueFor('${d.owner}','${esc(d.dept)}')">View cases</button></td>
+        </tr>`;
+    }
+    // All-years aggregate across every routed owner.
+    const S_ALL = CLAIM_STATS_ALL;
+
+    // ---------- case queue ----------
+    function queueRows() {
+      let rows = OWNER_QUEUE.slice();
+      if (ownerFilter) rows = rows.filter((r) => r.own === ownerFilter);
+      if (queueReason) rows = rows.filter((r) => r.reasons.includes(queueReason));
+      if (queueDept) rows = rows.filter((r) => r.de === queueDept && (!ownerFilter || r.own === ownerFilter));
+      return rows;
+    }
+
+    function queueFor(owner, dept) {
+      ownerFilter = owner || '';
+      queueOwner = owner || '';
+      queueReason = '';
+      queueDept = dept || '';
+      if (dept) queueGroup = 'own';
+      render();
+      document.getElementById('casequeue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function clearQueue() {
+      ownerFilter = '';
+      queueOwner = '';
+      queueReason = '';
+      queueDept = '';
+      render();
+    }
+
+    // Compact "owner bar" picker so a manager's cases can be reached in one click.
+    function queueOwnerBars() {
+      const g = grouping();
+      const rows = queueRows();
+      const buckets = new Map();
+      for (const r of rows) for (const k of g.key(r)) buckets.set(k, (buckets.get(k) || 0) + 1);
+      const list = [...buckets.entries()].sort((a, b) => b[1] - a[1]);
+      if (list.length < 2) return '';
+      const max = list[0][1];
+      return `<div class="qminibars">${list.map(([k, n]) => `
+        <button type="button" class="qmini" onclick="openGroupBy('${esc(k)}')">
+          <span class="lbl">${esc(g.text(k))}</span>
+          <span class="bar"><i style="width:${Math.round((n / max) * 100)}%"></i></span>
+          <span class="n">${num(n)}</span>
+        </button>`).join('')}</div>`;
+    }
+
+    function openGroupBy(key) {
+      const g = grouping();
+      const el = document.querySelector(`.qgroup[data-k="${CSS.escape(key)}"]`);
+      if (!el) return;
+      el.open = true;
+      toggleGroup(el);
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function rowHtml(r) {
+      return `
+        <tr>
+          <td><b>#${esc(r.id)}</b></td>
+          <td>${esc(r.o)}</td>
+          <td>${esc(r.ty)}</td>
+          <td>${esc(r.de)}</td>
+          <td><span class="owner-chip ${(OWNERS.find((o) => o.id === r.own) || {}).role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(ownerName(r.own))}</span></td>
+          <td>${r.am ? usd(r.am) : '<span class="mu">—</span>'}</td>
+          <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
+          <td>${esc(r.date)}</td>
+        </tr>`;
+    }
+
+    // ---------- render ----------
+    function render() {
+      const S = S_ALL;
+      const mgrs = sortedManagers();
+      const totalQueue = OWNER_QUEUE.length;
+      const busiest = managers().slice().sort((a, b) => statsFor(b.id).credit - statsFor(a.id).credit)[0];
+      const heaviest = managers().slice().sort((a, b) => b.queue - a.queue)[0];
+      const cleanest = managers().slice().sort((a, b) => a.queue / a.total - b.queue / b.total)[0];
+      const unassigned = S.unassigned;
+      const untyped = S.types.find((t) => t[0] === '(Unclassified)');
+      const untypedN = untyped ? untyped[1] : 0;
+      const rows = queueRows();
+
+      document.getElementById('app').innerHTML = `
+        <div class="row" style="margin-bottom:4px">
+          <div><h1>Admin Dashboard</h1><span class="mu">Ownership, workload and data quality across every manager · ${S.range}</span></div>
+          <div class="sp"></div>
+          <a class="btn" href="dashboard.html">← Claims Dashboard</a>
+        </div>
+        <div class="row" style="margin-bottom:18px">
+          <span class="b Low">Admin · all claims</span>
+          <span class="mu" style="font-size:12px">${num(S.total)} claims and ${usd(S.credit)} of credit measured from <b style="color:var(--tx)">${esc(SOURCE_FILE)}</b> (${esc(S.range)}), routed across ${managers().length} managers and 1 admin account.</span>
+        </div>
+
+        <!-- headline numbers -->
+        <div class="grid g4">
+          <div class="card kpi"><small>Claims under management</small><b>${num(S.total)}</b><span class="flat">${usd(S.credit)} total credit</span></div>
+          <div class="card kpi"><small>Open cases in queue</small><b>${num(totalQueue)}</b><span class="up">${pct(totalQueue, S.total)} of all claims</span></div>
+          <div class="card kpi"><small>Largest caseload</small><b>${esc(heaviest ? heaviest.name.split(' ')[0] : '—')}</b><span class="flat">${num(heaviest ? heaviest.queue : 0)} open · ${heaviest ? esc(heaviest.name) : ''}</span></div>
+          <div class="card kpi"><small>Highest credit value</small><b>${esc(busiest ? busiest.name.split(' ')[0] : '—')}</b><span class="up">${usd(busiest ? busiest.credit : 0)} of credit</span></div>
+        </div>
+
+        <!-- ownership matrix -->
+        <div class="row sec first" style="margin-top:24px">
+          <div><h3>Manager Comparison</h3><span class="mu">Who owns what, and how much of it is still open · click a column to sort</span></div>
+        </div>
+        <div class="card tw">
+          <table>
+            <tr>${th('name', 'Manager')}${th('total', 'Claims')}${th('credit', 'Credit')}${th('depts', 'Depts')}${th('resolution', 'Resolved')}${th('open', 'Not resolved')}${th('unfinished', 'Entry not finished')}${th('queue', 'Open queue')}<th>Res. rate</th><th>Queue load</th></tr>
+            ${mgrs.map(managerRow).join('')}
+            <tr class="tot">
+              <td><b>All managers</b></td>
+              <td><b>${num(add(mgrs.map((m) => m.total)))}</b></td>
+              <td><b>${usd(add(mgrs.map((m) => m.credit)))}</b></td>
+              <td><b>${managers().reduce((a, m) => a + m.depts, 0)}</b></td>
+              <td><b>${num(add(mgrs.map((m) => statsFor(m.id).resolved)))}</b></td>
+              <td><b>${num(add(mgrs.map((m) => m.open)))}</b></td>
+              <td><b>${num(add(mgrs.map((m) => m.unfinished)))}</b></td>
+              <td><b>${num(add(mgrs.map((m) => m.queue)))}</b></td>
+              <td><b>${pct(add(mgrs.map((m) => statsFor(m.id).resolved)), add(mgrs.map((m) => m.total)))}</b></td>
+              <td></td>
+            </tr>
+          </table>
+        </div>
+        <p class="mu" style="font-size:12px;margin-top:8px">
+          Ownership is routed from each claim's <b>ClaimDept</b> to a named manager, because the export has no assignee field
+          (<code>ClaimAction</code> is empty in all ${num(S.total)} rows). Swap <code>OWNER_OF_DEPT</code> in <code>data.js</code> for a real assignment feed when one exists.
+        </p>
+
+        <!-- per-manager cards -->
+        <div class="row sec" style="margin-top:24px">
+          <div><h3>Manager Breakdown</h3><span class="mu">Each manager's caseload, credit and worst claim types</span></div>
+        </div>
+        <div class="grid g3">
+          ${mgrs.map((m) => {
+            const s = statsFor(m.id);
+            const top3 = s.types.slice(0, 3);
+            return `
+              <div class="card mcard">
+                <div class="row">
+                  <span class="avatar">${initials(m.name)}</span>
+                  <div style="flex:1">
+                    <b>${esc(m.name)}</b>
+                    <div class="mu" style="font-size:11px">${esc(m.email)}</div>
+                  </div>
+                  ${m.status === 'Inactive' ? '<span class="b Rejected">Inactive</span>' : '<span class="b Low">Active</span>'}
+                </div>
+                <div class="mrow">
+                  <div><em>${num(m.total)}</em><span>claims</span></div>
+                  <div><em>${usd(m.credit)}</em><span>credit</span></div>
+                  <div><em>${num(m.queue)}</em><span>open</span></div>
+                </div>
+                <div class="mtop">
+                  ${top3.map((t) => `<div class="mb"><span>${esc(t[0])}</span><b>${num(t[1])}</b></div>`).join('')}
+                </div>
+                <div class="row" style="margin-top:10px;gap:6px">
+                  <button class="btn s" onclick="queueFor('${m.id}')">Open queue</button>
+                  <a class="btn s ghost" href="dashboard.html">Their dashboard</a>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+
+        <!-- dept ownership -->
+        <div class="row sec" style="margin-top:24px">
+          <div><h3>Department → Owner</h3><span class="mu">Which manager owns each department in the export</span></div>
+        </div>
+        <div class="card tw">
+          <table>
+            <tr><th>Department</th><th>Claims</th><th>Share</th><th>Open cases</th><th>Owner</th><th></th></tr>
+            ${DEPT_OWNERS.map(deptRow).join('')}
+          </table>
+        </div>
+
+        <!-- data quality -->
+        <div class="row sec" style="margin-top:24px">
+          <div><h3>Data Quality &amp; Coverage</h3><span class="mu">Gaps that limit what any dashboard can tell you</span></div>
+        </div>
+        <div class="grid g4">
+          <div class="card icard"><span class="tag">Root cause</span><b class="ttl">${pct(S.noRca, S.total)} blank</b><p class="mu">RootCauseAnalysis is filled on only ${num(S.rcaFilled)} of ${num(S.total)} claims (${pct(S.rcaFilled, S.total)}). Cause analysis is not possible until it is captured.</p></div>
+          <div class="card icard"><span class="tag">Claim type</span><b class="ttl">${num(untypedN)} unclassified</b><p class="mu">${pct(untypedN, S.total)} of claims have no claim type, so the real mix is hidden. ${num(DATA_QUALITY.distinctTypes)} distinct types are in use.</p></div>
+          <div class="card icard"><span class="tag">Ownership</span><b class="ttl">${num(unassigned)} unassigned</b><p class="mu">${pct(unassigned, S.total)} of claims have no owning department and sit with the admin account. Routing is a model, not a fact.</p></div>
+          <div class="card icard"><span class="tag">Status field</span><b class="ttl">Effectively unused</b><p class="mu">ClaimStatus is a sparse code (${esc(DATA_QUALITY.statusCodes.join(', '))}) and ${num(DATA_QUALITY.resolvedNoDate)} resolved claims carry no resolved date, so status is derived from the Resolved/Denied/Cancelled flags instead.</p></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="row"><h3>Where the export is thin</h3><div class="sp"></div><span class="b Med">limits analysis</span></div>
+          <p class="mu" style="font-size:12px;line-height:1.7">
+            <b style="color:var(--tx)">${num(DATA_QUALITY.blankType)}</b> claims have no claim type ·
+            <b style="color:var(--tx)">${num(DATA_QUALITY.blankDept)}</b> have no owning department ·
+            <b style="color:var(--tx)">${num(DATA_QUALITY.junk)}</b> carry the placeholder department "Claim Dept" ·
+            <b style="color:var(--tx)">${num(DATA_QUALITY.nearDupeClaims)}</b> sit in near-duplicate department names (${DATA_QUALITY.nearDupes.map((g) => esc(g.replace(/\|/g, ' / '))).join(' · ')}) ·
+            <b style="color:var(--tx)">Currency</b> is blank on every row and <b style="color:var(--tx)">ClaimAction</b> is blank on every row, so no currency conversion or task history can be derived.
+          </p>
+        </div>
+
+        <!-- case queue -->
+        <div class="card" id="casequeue" style="margin-top:24px;scroll-margin-top:80px">
+          <div class="row">
+            <h3>All Open Cases</h3>
+            <div class="sp"></div>
+            <select onchange="ownerFilter=this.value;render()">
+              <option value="">All owners</option>
+              ${OWNERS.map((o) => `<option value="${o.id}"${ownerFilter === o.id ? ' selected' : ''}>${esc(o.name)} (${num(OWNER_QUEUE.filter((q) => q.own === o.id).length)})</option>`).join('')}
+            </select>
+            <select onchange="queueReason=this.value;render()">
+              <option value="">All flags</option>
+              ${['Unresolved', 'Denied', 'Cancelled', 'Entry not finished', 'Repeat-claim order', 'Unassigned Department']
+                .map((r) => `<option value="${r}"${queueReason === r ? ' selected' : ''}>${esc(r)} (${num(OWNER_QUEUE.filter((q) => q.reasons.includes(r)).length)})</option>`).join('')}
+            </select>
+            <button class="btn s" onclick="clearQueue()">Clear</button>
+          </div>
+
+          <div class="qbar">
+            <span class="mu">Group by</span>
+            <select onchange="queueGroup=this.value;openGroups.clear();render()">
+              ${Object.entries(GROUPINGS).map(([k, g]) => `<option value="${k}"${queueGroup === k ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}
+            </select>
+            <div class="sp"></div>
+            <button class="btn s" onclick="expandAllGroups()">Expand all</button>
+            <button class="btn s" onclick="collapseAllGroups()">Collapse all</button>
+          </div>
+
+          <p class="mu" style="font-size:12px;margin:0">
+            ${num(rows.length)} of ${num(totalQueue)} open cases, newest first, in ${groupSummaryLine(rows, { key: grouping().key })} of ${esc(grouping().label).toLowerCase()}.
+            Open a group to see its cases.
+          </p>
+
+          <div id="qscope" class="mu" style="font-size:12px;margin:6px 0"></div>
+
+          ${queueOwnerBars()}
+
+          <div class="tw" style="border:0;margin-top:10px;border-radius:0 0 0 0">
+            <table class="qtable">
+              <thead><tr><th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th><th>Owner</th><th>Credit</th><th>Flag</th><th>Raised</th></tr></thead>
+                ${groupedTable(rows, {
+                  cols: 8,
+                  key: grouping().key,
+                  label: grouping().text,
+                  max: grouping().max || 0,
+                  onlyKey: queueDept || null,
+                  rowSort: (a, b) => String(b.date).localeCompare(String(a.date)),
+                  rowHtml: rowHtml,
+                  empty: 'No cases match the current filters.'
+                })}
+            </table>
+          </div>
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAdmin()) return;
+      document.body.innerHTML = layout('admin-dash');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

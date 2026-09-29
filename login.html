@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Choose sign-in</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Step 1 of 2. This page only asks which door you are walking through.
+    // No names, no email addresses, no credentials. Those belong on the next
+    // page, which is reached only after a role is chosen.
+
+    function continueAs(r) {
+      location.href = 'login-credentials.html?role=' + encodeURIComponent(r);
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+      if (!app) return;
+      const s = getSession();
+
+      app.innerHTML = `
+        <div class="login-head">
+          <div class="logo" style="margin-bottom:4px"><i></i>Claims Portal</div>
+          <p class="mu" style="margin:0">Sign in to Claims Management &amp; Intelligence</p>
+        </div>
+
+        ${s ? `<div class="card resume">
+            <b>Signed in as ${esc(s.name)} · ${s.role}</b>
+            <p class="mu" style="font-size:12px;margin:6px 0 12px">You are already signed in on this device.</p>
+            <div class="row" style="gap:8px">
+              <a class="btn p s" href="dashboard.html">Go to dashboard</a>
+              <button class="btn ghost s" onclick="signOut()">Sign out</button>
+            </div>
+          </div>` : ''}
+
+        <p class="mu pickhint">Choose how you are signing in</p>
+
+        <div class="rolegrid">
+          <button type="button" class="card rolecard adm" onclick="continueAs('Admin')">
+            <span class="ricon">&#9819;</span>
+            <b class="rtitle">Admin</b>
+            <p class="mu rblurb">Every claim, plus the Admin Dashboard showing who owns which case, workload per manager, and system settings.</p>
+            <span class="go">Continue &rarr;</span>
+          </button>
+
+          <button type="button" class="card rolecard mgr" onclick="continueAs('Manager')">
+            <span class="ricon">&#128100;</span>
+            <b class="rtitle">Manager</b>
+            <p class="mu rblurb">Only the claims routed to you, with the same dashboard and charts scoped to your own caseload.</p>
+            <span class="go">Continue &rarr;</span>
+          </button>
+        </div>
+
+        <p class="mu foot">Demo build. There is no server, so access control is enforced in the page rather than on a backend.</p>`;
+    }
+
+    document.addEventListener('DOMContentLoaded', render);
+  </script>
+</head>
+<body>
+  <div class="login">
+    <div class="loginwrap" id="app"></div>
+  </div>
+</body>
+</html>

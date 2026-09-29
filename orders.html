@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Orders</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // ------------------------------------------------------------------
+    // The export carries OrderID and nothing else about the order: no
+    // customer, product, quantity, price or carrier. So an "order" here is a
+    // real aggregate of the claims raised against it, and the page says so
+    // rather than inventing an invoice.
+    //   [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners]
+    // ------------------------------------------------------------------
+    let selectedOrder = '';
+    let orderQuery = '';
+    let onlyMulti = false;
+
+    const orderOwners = (o) => (o[8] || '').split('~').filter(Boolean);
+    const orderLabel = (o) => o[7] || 'Customer Order';
+
+    function visibleOrders() {
+      const s = getSession();
+      let rows = ORDERS;
+      if (s && s.role !== 'Admin') rows = rows.filter((o) => orderOwners(o).includes(s.id));
+      if (onlyMulti) rows = rows.filter((o) => o[1] > 1);
+      if (orderQuery) {
+        const q = orderQuery.trim().toLowerCase();
+        if (q) rows = rows.filter((o) => String(o[0]).toLowerCase().includes(q));
+      }
+      return rows;
+    }
+
+    function render() {
+      const orders = visibleOrders();
+      const s = getSession();
+      const admin = isAdmin();
+
+      const shown = orders.slice(0, 100);
+      if (!orders.some((o) => o[0] === selectedOrder)) selectedOrder = orders.length ? orders[0][0] : '';
+      const order = orders.find((o) => o[0] === selectedOrder) || orders[0];
+
+      const related = order
+        ? scopedClaims().filter((c) => c.or === order[0])
+        : [];
+
+      const totalCredit = orders.reduce((a, o) => a + o[2], 0);
+      const totalClaims = orders.reduce((a, o) => a + o[1], 0);
+      const repeat = orders.filter((o) => o[1] > 1).length;
+
+      document.getElementById('app').innerHTML = `
+        <div class="row" style="margin-bottom:4px">
+          <div><h1>Orders</h1><span class="mu">${num(orders.length)} order${orders.length === 1 ? '' : 's'} in your scope · ${num(totalClaims)} claims · ${usd(totalCredit)} credit</span></div>
+        </div>
+        <div class="row" style="margin-bottom:14px">
+          <span class="b ${admin ? 'Low' : 'Med'}">${admin ? 'Admin · all orders' : 'Manager · your caseload only'}</span>
+          <span class="mu" style="font-size:12px">${admin
+            ? 'Every order in the export that raised a claim.'
+            : `Only orders carrying a claim routed to ${esc(s.name)}.`}</span>
+          <div class="sp"></div>
+          <input placeholder="Find order ID" value="${esc(orderQuery)}" oninput="orderQuery=this.value;render()" style="width:170px">
+          <label class="mu" style="font-size:12px;display:flex;gap:6px;align-items:center;cursor:pointer">
+            <input type="checkbox" ${onlyMulti ? 'checked' : ''} onchange="onlyMulti=this.checked;render()"> repeat-claim only
+          </label>
+        </div>
+
+        <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
+          <div class="card tw"><table>
+            <tr><th>Order ID</th><th>Type</th><th>Claims</th><th>Open</th><th>Credit</th><th>Depts</th><th>First–last claim</th></tr>
+            ${shown.length ? shown.map((o) => `
+              <tr class="cl${o[0] === selectedOrder ? ' on' : ''}" onclick="selectedOrder='${o[0]}';render()">
+                <td><b>${o[0]}</b>${o[1] > 1 ? ` <span class="b Med">repeat ×${o[1]}</span>` : ''}</td>
+                <td>${esc(orderLabel(o))}</td>
+                <td>${num(o[1])}</td>
+                <td>${o[3] ? `<span class="b Med">${num(o[3])}</span>` : '0'}</td>
+                <td>${usd(o[2])}</td>
+                <td>${num(o[4])}</td>
+                <td class="mu" style="font-size:11px">${esc(o[5])} → ${esc(o[6])}</td>
+              </tr>`).join('')
+              : `<tr><td colspan="7" class="mu">No orders match this filter.</td></tr>`}
+          </table>
+          ${orders.length > shown.length
+            ? `<div class="mu" style="font-size:12px;padding:10px 14px">Showing first ${shown.length} of ${num(orders.length)} matching orders — narrow the search to see more.</div>`
+            : ''}
+          </div>
+
+          ${order ? `
+          <div class="card"><h3>Order ${order[0]}</h3>
+            <dl class="dl">
+              <dt>Order type</dt><dd>${esc(orderLabel(order))}</dd>
+              <dt>Claims raised</dt><dd>${num(order[1])}${order[1] > 1 ? ` <span class="b Med">repeat claim order</span>` : ''}</dd>
+              <dt>Still open</dt><dd>${num(order[3])}</dd>
+              <dt>Total credit</dt><dd>${usd(order[2])}</dd>
+              <dt>Departments involved</dt><dd>${num(order[4])}</dd>
+              <dt>Claim window</dt><dd>${esc(order[5])} → ${esc(order[6])}</dd>
+              <dt>Routed owners</dt><dd>${orderOwners(order).map((id) => {
+                const o = OWNERS.find((x) => x.id === id);
+                return o ? `<span class="owner-chip ${o.role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(o.name)}</span>` : esc(id);
+              }).join(' ')}</dd>
+              <dt>Worked claims</dt><dd>${related.length
+                ? related.map((c) => `<a style="color:var(--pr)" href="claim-detail.html?id=${c.id}">${c.id}</a>`).join(', ')
+                : '<span class="mu">No claim from this order is in the worked-examples set.</span>'}</dd>
+            </dl>
+            <p class="mu" style="font-size:11px;margin-top:12px;line-height:1.6">
+              The export contains no customer, product, quantity, price or carrier fields, so those
+              columns cannot be shown for any order. Everything above is measured from the claim rows
+              that reference this OrderID.
+            </p>
+          </div>` : ''}
+        </div>
+
+        <div class="row sec" style="margin-top:24px">
+          <div><h3>Repeat-claim orders</h3><span class="mu">${num(repeat)} of the ${num(orders.length)} orders in scope raised more than one claim</span></div>
+        </div>
+        <div class="grid g4">
+          <div class="card kpi"><small>Orders in scope</small><b>${num(orders.length)}</b><span class="flat">${num(totalClaims)} claims behind them</span></div>
+          <div class="card kpi"><small>Repeat-claim orders</small><b>${num(repeat)}</b><span class="up">${pct(repeat, orders.length)} of orders</span></div>
+          <div class="card kpi"><small>Credit on these orders</small><b>${usd(totalCredit)}</b><span class="flat">${usd(orders.length ? totalCredit / orders.length : 0)} average</span></div>
+          <div class="card kpi"><small>Orders with open claims</small><b>${num(orders.filter((o) => o[3] > 0).length)}</b><span class="up">still unresolved work</span></div>
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAuth()) return;
+      document.body.innerHTML = layout('orders');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

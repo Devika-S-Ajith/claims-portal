@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal — Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    const COLORS = ['#6366f1', '#3b82c4', '#e8a13a', '#7d4fc0', '#ef6c6c', '#4b9c6c', '#b3a49b'];
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const TYPES_TOP = 10;
+    const DEPT_TOP = 10;
+
+    let year = LATEST_YEAR;
+    let typesExpanded = false;
+let focus = null;
+let queueGroup = 'reason';
+let queueSearch = '';
+    let rateMetric = 'open';
+    const metric = { types: 'count', dept: 'value' };
+
+    const pnum = (a, b) => (b ? (a / b) * 100 : 0);
+    // Whole dollars - cents are noise on a card that also shows a claim count.
+    const cash = (n) => '$' + Math.round(n).toLocaleString();
+
+    function zeroBlock(label) {
+      return {
+        range: label, total: 0, credit: 0, avgCredit: 0, credited: 0, creditIssued: 0,
+        memos: 0, maxClaim: 0, resolved: 0, open: 0, cancelled: 0, denied: 0,
+        unresolved: 0, unfinished: 0, noRca: 0, rcaFilled: 0, unassigned: 0,
+        repeatOrders: 0, repeatClaims: 0, repeatCredit: 0, medianDays: 0, p90Days: 0,
+        sameDayPct: 0, resolvedTimed: 0, raisers: 0, capaFilled: 0, paFilled: 0,
+        orders: 0, orderClaims: 0, multiOrders: 0, claimsPerOrder: 0, repeatRate: 0,
+        noCredit: 0, sampleClaims: 0,
+        status: [['Open', 0, 0]], area: [], dist: [], types: [], dept: [], months: [],
+        typeMonths: []
+      };
+    }
+
+    function stats(y) {
+      const me = getSession();
+      if (isAdmin()) return CLAIM_STATS_BY_YEAR[y] || zeroBlock('No ' + y + ' claims');
+      return (CLAIM_STATS_BY_YEAR_OWNER[y] || {})[me.id] || zeroBlock('No ' + y + ' claims for ' + me.id);
+    }
+
+    // [dept, owner, area, claims, orders, open, credit, openCredit, memo, repeatOrders, noCredit]
+    function deptFacts() {
+      const bucket = DEPT_FACTS[year] || DEPT_FACTS.all || { all: [] };
+      const me = getSession();
+      return isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
+    }
+
+    // The queue covers every open claim ever raised. The dashboard is year
+    // scoped, so it is cut to the selected year - which also means every count
+    // on this page is the same population the table below shows.
+    function queue() {
+      return scopedQueue().filter((r) => String(r.date || '').slice(0, 4) === String(year));
+    }
+
+    const qsum = (rows) => rows.reduce((a, r) => a + (r.am || 0), 0);
+    const qcount = (rows, flag) => rows.filter((r) => r.reasons.includes(flag));
+
+    let S, PREV;
+
+    // ---------- small shared pieces ----------
+    function delta(now, prev) {
+      if (!prev) return null;
+      const d = (now - prev) / prev;
+      return { up: d > 0, good: d < 0, txt: (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '– ') + Math.abs(d * 100).toFixed(1) + '% vs last year' };
+    }
+
+    // Compact money for axis ticks and labels that only have ~50px of width.
+    const usdK = (n) =>
+      n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'K' : '$' + Math.round(n);
+
+    function sect(title, note, right) {
+      return (
+        `<div class="row sec">` +
+        `<div><h2>${title}</h2>${note ? `<span class="mu">${note}</span>` : ''}</div>` +
+        `<div class="sp"></div>${right || ''}</div>`
+      );
+    }
+
+    function cardTitle(t, note, right) {
+      return `<div class="row cht"><h3>${t}</h3>${note ? `<span class="mu cht-n">${note}</span>` : ''}<div class="sp"></div>${right || ''}</div>`;
+    }
+
+    // Like-for-like: the current year is a part year, so last year is cut to the
+    // same number of months. Comparing 9 months of 2026 against 12 of 2025 is
+    // the single easiest way to make a trend look like a collapse.
+    function monthsSoFar() {
+      let n = 0;
+      S.months.forEach((m, i) => { if (m[0] > 0) n = i + 1; });
+      return n || 12;
+    }
+    function upTo(block, n) {
+      let c = 0, v = 0;
+      for (let i = 0; i < n; i++) { c += block.months[i] ? block.months[i][0] : 0; v += block.months[i] ? block.months[i][1] : 0; }
+      return { c, v };
+    }
+
+    // ---------- charts ----------
+    function donut(key, data) {
+      const i = metric[key] === 'value' ? 2 : 1;
+      const total = data.reduce((s, d) => s + d[i], 0) || 1;
+      let offset = 25;
+      const arcs = data.map((d, n) => {
+        const p = (d[i] / total) * 100;
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${COLORS[n % COLORS.length]}" stroke-width="6" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="${offset}"><title>${esc(d[0])}: ${fmt(key, d[i])} (${p.toFixed(1)}%)</title></circle>`;
+        offset -= p;
+        return arc;
+      }).join('');
+      const legend = data.map((d, n) =>
+        `<div><i style="background:${COLORS[n % COLORS.length]}"></i>${esc(d[0])}<em>${fmt(key, d[i])} · ${pnum(d[i], total).toFixed(1)}%</em></div>`
+      ).join('');
+      const center = metric[key] === 'value' ? usd(total) : num(total);
+      return (
+        `<div class="row"><svg class="donut" width="126" height="126" viewBox="0 0 42 42" role="img" aria-label="Share of claims">${arcs}` +
+        `<text x="21" y="23" text-anchor="middle" font-size="${metric[key] === 'value' ? 6 : 7}" font-weight="600" fill="currentColor">${center}</text></svg>` +
+        `<div class="legend">${legend}</div></div>`
+      );
+    }
+
+    function hbar(key, data, max) {
+      const i = metric[key] === 'value' ? 2 : 1;
+      const top = max || Math.max(...data.map((d) => d[i]), 1);
+      return data.map((d) => {
+        const v = d[i];
+        return (
+          `<div class="hb${metric[key] === 'value' ? ' wide' : ''}">` +
+          `<div title="${esc(d[0])}">${esc(d[0])}</div>` +
+          `<div class="trk"><span style="width:${pnum(v, top).toFixed(1)}%"></span></div>` +
+          `<b>${fmt(key, v)}</b></div>`
+        );
+      }).join('');
+    }
+
+    // Two measures per department, side by side. The old report showed this with
+    // no x-axis labels at all, so the reader could not tell which bar was which.
+    function pairBars(rows, labels) {
+      const top = Math.max(...rows.flatMap((d) => [d.credit, d.memo]), 1);
+      return (
+        `<div class="pb">` +
+        rows.map((d) => `
+          <div class="pbg">
+            <div class="pbl" title="${esc(d.dept)}">${esc(d.dept)}</div>
+            <div class="pbars">
+              <div class="trk" title="${esc(labels[0])}: ${usd(d.credit)}"><span style="width:${pnum(d.credit, top).toFixed(1)}%;background:linear-gradient(90deg,#6366f1,#8b93f8)"></span></div>
+              <div class="trk" title="${esc(labels[1])}: ${usd(d.memo)}"><span style="width:${pnum(d.memo, top).toFixed(1)}%;background:linear-gradient(90deg,#e8a13a,#f2c778)"></span></div>
+            </div>
+            <div class="pbv">${usd(d.credit)}</div>
+          </div>`).join('') +
+        `</div>`
+      );
+    }
+
+    // Month-on-month, this year against the same months last year.
+    // The scale is set by the tallest single MONTH, not by the annual total, and
+    // rounded to a readable step so the bars are sized against round numbers.
+    function niceScale(raw, steps) {
+      const s = steps || 4;
+      const rough = Math.max(raw, 1) / s;
+      const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+      const norm = rough / mag;
+      const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+      return { step, top: step * s };
+    }
+
+    // months[i] = [claimCount, credit]. vi picks which one is plotted, so the
+    // credit chart plots credit rather than counts wearing a dollar sign.
+    // No y-axis and no gridlines: every bar carries its own value, so a scale
+    // down the side would only repeat what is already printed on the chart.
+    function monthCompare(n, f, compact, vi) {
+      const a = upTo(PREV, n), b = upTo(S, n);
+      const k = vi || 0;
+      const cells = MONTHS.slice(0, n).map((m, i) => ({
+        m,
+        p: PREV.months[i] ? PREV.months[i][k] : 0,
+        c: S.months[i] ? S.months[i][k] : 0
+      }));
+      const tallest = Math.max(...cells.map((d) => Math.max(d.p, d.c)));
+      const { top } = niceScale(tallest);
+      const show = compact;
+      return (
+        `<div class="mchart noaxis">
+          <div class="mcs">
+            ${cells.map(({ m, p, c }) => {
+              const d = p ? ((c - p) / p) * 100 : c ? 100 : 0;
+              return `<div class="mg">
+                <div class="mgs">
+                  <b class="mgv" style="bottom:${Math.min(97, pnum(c, top)).toFixed(1)}%">${show(c)}</b>
+                  <div class="mbars">
+                    <div class="mbar a" style="height:${Math.max(1.2, pnum(p, top)).toFixed(1)}%" title="${m} ${year - 1}: ${f(p)}"></div>
+                    <div class="mbar b" style="height:${Math.max(1.2, pnum(c, top)).toFixed(1)}%" title="${m} ${year}: ${f(c)}"></div>
+                  </div>
+                </div>
+                <label>${m}</label>
+                <em class="mgd ${d > 0.5 ? 'up' : d < -0.5 ? 'dn' : 'fl'}">${Math.abs(d) < 0.5 ? '0%' : (d > 0 ? '+' : '−') + Math.abs(d).toFixed(0) + '%'}</em>
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="mctot">
+            <span>${n} months</span>
+            <span><i style="background:#b3a49b"></i>${year - 1} <b>${f(k ? a.v : a.c)}</b></span>
+            <span><i style="background:#6366f1"></i>${year} <b>${f(k ? b.v : b.c)}</b></span>
+            <span class="mgd ${(k ? b.v : b.c) > (k ? a.v : a.c) ? 'up' : 'dn'}">${(k ? b.v : b.c) > (k ? a.v : a.c) ? '+' : '−'}${Math.abs((((k ? b.v : b.c) - (k ? a.v : a.c)) / ((k ? a.v : a.c) || 1)) * 100).toFixed(1)}%</span>
+          </div>
+        </div>`
+      );
+    }
+
+    function vbarFixed(data, heightIdx, valueIdx, f) {
+      const max = Math.max(...data.map((d) => d[heightIdx]), 1);
+      return (
+        `<div class="vb">` +
+        data.map((d) => {
+          const v = d[heightIdx];
+          return `<div><em>${f(d[valueIdx])}</em><span style="height:${Math.max(3, pnum(v, max)).toFixed(1)}px"></span><label>${esc(d[0])}</label></div>`;
+        }).join('') +
+        `</div>`
+      );
+    }
+
+    function line(a, b, label, unit) {
+      const all = [...a, ...b].filter((v) => v > 0);
+      const max = all.length ? Math.max(...all) : 1;
+      const x = (i) => 20 + (i * 300) / 11;
+      const y = (v) => 110 - (v / max) * 95;
+      const points = (v) => v.map((val, i) => `${x(i)},${y(val)}`).join(' ');
+
+      const dots = [b, a].map((series, k) => series.map((val, i) =>
+        val > 0
+          ? `<circle cx="${x(i)}" cy="${y(val)}" r="2.5" class="pt" fill="${k ? '#6366f1' : '#b3a49b'}">` +
+            `<title>${MONTHS[i]} ${k ? year : year - 1}: ${unit === 'k' ? usd(val * 1000) : num(val)}</title></circle>`
+          : ''
+      ).join('')).join('');
+
+      const labels = MONTHS.map((m, i) => `<text x="${x(i)}" y="126" font-size="8" text-anchor="middle" fill="#8fa69a">${m}</text>`).join('');
+
+      return (
+        `<svg class="trend" viewBox="0 0 340 130" width="100%" role="img" aria-label="${label}">` +
+        `<polyline points="${points(b)}" fill="none" stroke="#b3a49b" stroke-width="2" stroke-dasharray="4 3"/>` +
+        `<polyline points="${points(a)}" fill="none" stroke="#6366f1" stroke-width="2.5"/>` +
+        `${dots}${labels}</svg>` +
+        `<div class="legend row">` +
+        `<span><i style="background:#6366f1"></i> ${year}</span>` +
+        `<span><i style="background:#b3a49b"></i> ${year - 1}</span>` +
+        `<span>${label}</span></div>`
+      );
+    }
+
+    function fmt(key, n) {
+      return metric[key] === 'value' ? usd(n) : num(n);
+    }
+    const isMoney = (k) => metric[k] === 'value';
+
+    function seg(key, on, off) {
+      return (
+        `<div class="seg" role="group">` +
+        `<button type="button" class="${isMoney(key) ? '' : 'on'}" aria-pressed="${!isMoney(key)}" onclick="setMetric('${key}')">${on}</button>` +
+        `<button type="button" class="${isMoney(key) ? 'on' : ''}" aria-pressed="${isMoney(key)}" onclick="setMetric('${key}')">${off}</button>` +
+        `</div>`
+      );
+    }
+    function setMetric(key) { metric[key] = isMoney(key) ? 'count' : 'value'; render(); }
+    function setYear(y) { year = y; typesExpanded = false; focus = null; queueSearch = ''; render(); }
+    function toggleTypes() { typesExpanded = !typesExpanded; render(); }
+    function setRate(k) { rateMetric = k; render(); }
+
+    // Reporting-year dropdown, same open/close behaviour as the nav menu.
+    function yearMenu(btn) {
+      const dd = btn.closest('.dropdown');
+      const open = !dd.classList.contains('open');
+      document.querySelectorAll('.dropdown.open').forEach((o) => {
+        o.classList.remove('open');
+        o.querySelector('button')?.setAttribute('aria-expanded', 'false');
+      });
+      dd.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', String(open));
+      return false;
+    }
+
+    // ---------- the panel: volume + value cards, then AI insights ----------
+    // Two groups, because they answer different questions.
+    //   ai   - what the numbers mean. Four patterns, each computed from the
+    //           monthly claim-type series, never from a model.
+    //   card - what the numbers are. Total / open / resolved / awaiting action
+    //           / repeat orders. Each count links to the claims behind it,
+    //           except the whole-year totals which have nothing to filter to.
+    // Source columns and definitions for every card are in DASHBOARD.md.
+    const SEV = { 1: ['Do first', 'p1'], 2: ['Do next', 'p2'], 3: ['For context', 'p3'] };
+    const GROUPS = [
+      ['ai', 'AI suggestions', 'Patterns the data shows'],
+      ['card', 'The numbers', 'Volume, value and what is still outstanding']
+    ];
+
+    // 12-point sparkline of a monthly series, so a standing fault is visible
+    // rather than something the reader has to take on trust.
+    function spark(ms, n) {
+      const vals = ms.slice(0, n);
+      if (vals.length < 2) return '';
+      const max = Math.max(...vals, 1);
+      const w = 100, h = 30;
+      const x = (i) => (i * w) / (vals.length - 1);
+      const y = (v) => h - 4 - (v / max) * (h - 9);
+      const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+      const dots = vals.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="1.7"/>`).join('');
+      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/>${dots}</svg>`;
+    }
+
+    // Four insights, all measured off S.typeMonths (the top 12 claim types by
+    // yearly count, each with its 12 monthly counts) plus the scoped year block.
+    function aiFindings() {
+      const out = [];
+      const n = monthsSoFar();
+      const series = (S.typeMonths || []).map(([t, ms]) => ({
+        t, ms,
+        inMonths: ms.slice(0, n).filter((v) => v > 0).length,
+        total: ms.slice(0, n).reduce((a, b) => a + b, 0)
+      }));
+      const creditOf = (t) => (S.types.find((x) => x[0] === t) || [, 0, 0])[2];
+      // S.types is ordered by count, not money. Ranking it again by credit is
+      // what makes "high-value" mean valuable rather than merely frequent.
+      const byValue = S.types.filter((t) => t[0] !== '(Unclassified)' && t[2] > 0).slice().sort((a, b) => b[2] - a[2]);
+      const real = series.filter((s) => s.t !== '(Unclassified)');
+
+      // Every insight claims a claim type, and once one has been used the next
+      // card moves to the next best candidate. Otherwise all four cards end up
+      // describing the same dominant type, which tells the reader nothing.
+      const used = new Set();
+      const claim = (cands) => {
+        const pick = cands.find((t) => !used.has(t));
+        if (pick) used.add(pick);
+        return pick;
+      };
+
+      // 1. Recurring issue - the type that turns up in every single month, so it
+      // is a standing fault rather than a one-off. (Unclassified) is left out
+      // because the blind-spot card below reports it, and counting it in both
+      // places would print the same number twice.
+      const chronic = real.filter((s) => s.inMonths === n && n >= 3 && s.total > 0);
+      const topChronic = claim(chronic.map((s) => s.t));
+
+      if (topChronic) {
+        const c = chronic.find((s) => s.t === topChronic);
+        out.push({
+          group: 'ai', rank: 1, label: 'Recurring issue', n: c.total, kind: 'ty', value: c.t,
+          v1: usd(creditOf(c.t)), v2: `${c.t} in ${c.inMonths} of ${n} months`,
+          spark: c.ms, nMonths: n
+        });
+      }
+
+      // 2. High-value impact - the claim type carrying the most money, which is
+      // where cutting volume pays off fastest. Measured on credit, not count.
+      const topValue = claim(byValue.map((t) => t[0]));
+      if (topValue) {
+        const t = byValue.find((x) => x[0] === topValue);
+        out.push({
+          group: 'ai', rank: 2, label: 'High-value impact', n: t[1], kind: 'ty', value: t[0],
+          v1: usd(t[2]), v2: `${t[0]} · ${pct(t[2], S.credit)} of credit`
+        });
+      }
+
+      // 3. Emerging trend - the type whose last three months run well above its
+      // first three. The floor stops a 3 -> 9 a month wobble on 20 claims from
+      // being dressed up as a trend.
+      const growers = real
+        .filter((s) => n >= 6 && s.total >= 40)
+        .map((s) => {
+          const ms = s.ms.slice(0, n);
+          const head = ms.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+          const tail = ms.slice(-3).reduce((a, b) => a + b, 0) / 3;
+          return { ...s, head, tail, ratio: head ? tail / head : tail ? 9 : 0 };
+        })
+        .filter((s) => s.ratio >= 1.5 && s.tail >= 4)
+        .sort((a, b) => b.ratio - a.ratio);
+      const topGrower = claim(growers.map((s) => s.t));
+      if (topGrower) {
+        const g = growers.find((s) => s.t === topGrower);
+        out.push({
+          group: 'ai', rank: 3, label: 'Emerging trend', n: g.total, kind: 'ty', value: g.t,
+          v1: usd(creditOf(g.t)), v2: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month`,
+          spark: g.ms, nMonths: n
+        });
+      }
+
+      // 4. Potential CAPA - where a corrective action is most obviously owed.
+      // Nothing in this file has a corrective action recorded against it, so
+      // the card points at the type with the largest pile of unfinished open
+      // claims and states how few claims carry one. It is a prompt to act, not
+      // a claim that a cause is already known.
+      const byOpen = {};
+      queue().forEach((r) => { byOpen[r.ty || '(Unclassified)'] = (byOpen[r.ty || '(Unclassified)'] || 0) + 1; });
+      // Deliberately not routed through claim(): (Unclassified) is usually the
+      // biggest open pile, and "the claims nobody has classified" is precisely
+      // where a corrective action is most overdue.
+      const topOpen = Object.keys(byOpen).sort((a, b) => byOpen[b] - byOpen[a])[0];
+      if (topOpen) {
+        out.push({
+          group: 'ai', rank: 4, label: 'Potential CAPA', n: byOpen[topOpen], kind: 'ty', value: topOpen,
+          v1: `${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
+          v2: `${topOpen} is the biggest open pile to write one against`
+        });
+      }
+
+      return out;
+    }
+
+    // The volume and value cards, in reading order. Each count is the exact
+    // number the table below shows for the same filter, so the panel and the
+    // table cannot disagree. Total claims has nothing to filter to, so it is
+    // the one card that just jumps to the table.
+    function buildActions() {
+      const q = queue();
+      const out = [];
+      const add = (o) => { if (o.n > 0) out.push(o); };
+
+      add({
+        group: 'card', rank: 1, sev: 3, n: S.total, kind: null, value: null,
+        label: 'Total claims', v1: usd(S.credit), v2: `${usd(S.avgCredit)} average each`
+      });
+
+      const open = qcount(q, 'Unresolved');
+      add({
+        group: 'card', rank: 2, sev: 1, n: S.unresolved, kind: 'reason', value: 'Unresolved',
+        label: 'Open claims', v1: cash(qsum(open)), v2: pct(S.unresolved, S.total) + ' of intake'
+      });
+
+      add({
+        group: 'card', rank: 3, sev: 3, n: S.resolved, kind: 'reason', value: 'Resolved',
+        label: 'Resolved claims', v1: pct(S.resolved, S.total) + ' closed',
+        v2: S.medianDays ? `${S.medianDays.toFixed(1)} days median` : 'median not measured'
+      });
+
+      add({
+        group: 'card', rank: 4, sev: 1, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
+        label: 'Awaiting action', v1: pct(S.unfinished, S.total) + ' of intake', v2: 'entry not marked finished'
+      });
+
+      add({
+        group: 'card', rank: 5, sev: 2, n: S.repeatClaims, kind: 'reason', value: 'Repeat-claim order',
+        label: 'Repeat-claim orders', v1: `${num(S.repeatOrders)} orders hit twice`, v2: usd(S.repeatCredit) + ' credit'
+      });
+
+      return aiFindings().concat(out).sort((a, b) => a.rank - b.rank);
+    }
+
+    const actCard = (a) => {
+      const sel = focus && a.kind && focus.kind === a.kind && focus.value === a.value ? ' sel' : '';
+      const chip = a.group === 'ai' ? 'AI' : SEV[a.sev][0];
+      const cls = a.group === 'ai' ? 'pai' : SEV[a.sev][1];
+      const go = a.kind ? (a.sev === 1 ? 'Open' : 'See') : 'Table';
+      const attrs = a.kind
+        ? `href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false"`
+        : 'href="#open"';
+      return `<a class="card act-card g-${a.group} ${cls}${sel}" ${attrs}>
+          <span class="pc ${cls}">${chip}</span>
+          <b class="ac-n">${num(a.n)}</b>
+          <span class="ac-label">${esc(a.label)}</span>
+          ${a.spark ? spark(a.spark, a.nMonths) : ''}
+          <div class="ac-foot">
+            <span class="ac-money">${a.v1}<em>${esc(a.v2)}</em></span>
+            <span class="go">${go} →</span>
+          </div>
+        </a>`;
+    };
+
+    function renderGroup(key, items) {
+      const meta = GROUPS.find((g) => g[0] === key);
+      if (!items.length) return '';
+      return `
+        <div class="agl">
+          <span class="agh ${key}">${meta[1]}</span>
+          <span class="mu" style="font-size:12px">${meta[2]}</span>
+          <div class="sp"></div>
+          <span class="mu" style="font-size:12px">${items.length} card${items.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="grid g3">${items.map(actCard).join('')}</div>`;
+    }
+
+    function renderFindings() {
+      const all = buildActions();
+      return GROUPS.map(([key]) => renderGroup(key, all.filter((a) => a.group === key))).join('');
+    }
+
+    // ---------- open claims table ----------
+    const QUEUE_GROUPS = {
+      reason: { label: 'Flag', key: (r) => r.reasons, max: 12 },
+      de: { label: 'Department', key: (r) => [r.de], max: 12 },
+      ar: { label: 'Team area', key: (r) => [r.ar], max: 8 },
+      ty: { label: 'Claim type', key: (r) => [r.ty], max: 12 },
+      st: { label: 'Status', key: (r) => [r.st], max: 10 }
+    };
+    const queueGrouping = () => QUEUE_GROUPS[queueGroup] || QUEUE_GROUPS.reason;
+
+    // Search matches the claim id and the order number, which are the two things
+    // a person actually holds in their hand when they look for a claim. Leading
+    // and trailing spaces are ignored so a pasted value still matches.
+    function searchHit(r) {
+      const q = searchTerm();
+      if (!q) return true;
+      return String(r.id).toLowerCase().includes(q) || String(r.o || '').toLowerCase().includes(q);
+    }
+
+    // queueSearch is a plain string in normal use, but coercing here keeps a
+    // stray non-string from taking the whole section down.
+    const searchTerm = () => String(queueSearch == null ? '' : queueSearch).trim().toLowerCase();
+    const searching = () => searchTerm() !== '';
+
+    function setQueueSearch(v) {
+      queueSearch = v == null ? '' : String(v);
+      render();
+      // Re-render blows away the input, so put the caret back where it was.
+      const el = document.getElementById('qsearch');
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    }
+
+    function matches(r) {
+      if (!searchHit(r)) return false;
+      if (!focus) return true;
+      if (focus.kind === 'reason') return r.reasons.includes(focus.value);
+      return r[focus.kind] === focus.value;
+    }
+
+    function jump(kind, value) {
+      focus = { kind, value, label: value };
+      render();
+      document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function clearFocus() {
+      focus = null;
+      render();
+      document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function statusBadge(s) {
+      const cls = { Resolved: 'Low', Open: 'Open', Cancelled: 'Rejected', Denied: 'Rejected' }[s] || 'Open';
+      return `<span class="b ${cls}">${s}</span>`;
+    }
+
+    function renderAttention() {
+      const all = queue();
+      const isSearching = searching();
+      const filtering = Boolean(focus) || isSearching;
+      const rows = filtering ? all.filter(matches) : all;
+      // No fallback to `all` while filtering: a search that matches nothing has
+      // to say so, not quietly display the whole queue again.
+      const shown = rows;
+      const admin = isAdmin();
+      const g = queueGrouping();
+
+      const banner = isSearching
+        ? `<div class="row" style="margin-bottom:10px">
+             <span class="b High">${esc(queueSearch.trim())}</span>
+             <span class="mu">${rows.length} of ${all.length} claim${rows.length === 1 ? '' : 's'} match</span>
+             <div class="sp"></div>
+             <button class="btn s" onclick="setQueueSearch('')">Clear search</button>
+           </div>`
+        : focus
+        ? `<div class="row" style="margin-bottom:10px">
+             <span class="b High">${esc(focus.value)}</span>
+             <span class="mu">${rows.length} of ${all.length}</span>
+             <div class="sp"></div>
+             <button class="btn s" onclick="clearFocus()">Clear</button>
+           </div>`
+        : `<div class="row" style="margin-bottom:10px">
+             <span class="b High">${num(all.length)}</span>
+             <span class="mu">${year} · ${admin ? 'all owners' : 'your caseload'}</span>
+           </div>`;
+
+      const colCount = admin ? 9 : 8;
+      // One table, one thead, one tbody per group. Separate tables per group
+      // let each size its own columns, which is what made the header stop
+      // lining up with the rows underneath it.
+      // No wrapper <tbody> here: groupedTable returns one <tbody> per group, and
+      // a <tbody> inside a <tbody> is invalid - browsers hoist the inner ones
+      // out and the grouping stops being scoped to this table.
+      const head = `<div class="tw" style="border:0;margin-top:10px;border-radius:0">
+          <table class="qtable">
+            <thead><tr><th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th>${admin ? '<th>Owner</th>' : ''}<th>Status</th><th>Credit</th><th>Why it is here</th><th>Raised</th></tr></thead>
+          </table>
+        </div>`;
+
+      const rowHtml = (r) => `
+        <tr class="${focus && matches(r) ? 'hit' : ''}">
+          <td><b>#${esc(r.id)}</b></td>
+          <td>${esc(r.o)}</td>
+          <td>${esc(r.ty)}</td>
+          <td>${esc(r.de)}</td>
+          ${admin ? `<td>${esc(ownerName(r.own))}</td>` : ''}
+          <td>${statusBadge(r.st)}</td>
+          <td>${r.am ? money(r.am) : '<span class="mu">—</span>'}</td>
+          <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
+          <td>${esc(r.date).slice(0, 10)}</td>
+        </tr>`;
+
+      const hits = isSearching ? rows.length : null;
+      const controls = `<div class="qbar">
+          <div class="qsearch">
+            <input id="qsearch" type="search" placeholder="Search claim no. or order no." value="${esc(queueSearch)}"
+              autocomplete="off" spellcheck="false" aria-label="Search by claim number or order number"
+              oninput="setQueueSearch(this.value)">
+            ${isSearching ? `<button class="qclear" type="button" onclick="setQueueSearch('')" aria-label="Clear search">×</button>` : ''}
+          </div>
+          <span class="mu">Group by</span>
+          <select onchange="queueGroup=this.value;openGroups.clear();render()">
+            ${Object.entries(QUEUE_GROUPS).map(([k, v]) => `<option value="${k}"${queueGroup === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
+          </select>
+          <div class="sp"></div>
+          <span class="mu">${hits === null ? '' : `${num(hits)} match${hits === 1 ? '' : 'es'} · `}${num(shown.length)} / ${num(all.length)}</span>
+          <button class="btn s" onclick="expandAllGroups()">Expand all</button>
+          <button class="btn s" onclick="collapseAllGroups()">Collapse all</button>
+        </div>`;
+
+      const body = groupedTable(shown, {
+        cols: colCount,
+        key: g.key,
+        max: g.max,
+        onlyKey: focus ? focus.value : null,
+        rowSort: (a, b) => String(b.date).localeCompare(String(a.date)),
+          rowHtml,
+          empty: isSearching
+            ? `No open claim matches "${queueSearch.trim()}".`
+            : focus
+              ? 'No open claims in your scope match this filter.'
+              : 'No open claims in your scope for this year.'
+        });
+
+      // Close the shared table, then splice the per-group <tbody>s in before
+      // that tag so the header and the data stay in one table.
+      return banner + controls + head.replace('</table>', body + '</table>');
+    }
+
+    // ---------- render ----------
+    function render() {
+      S = stats(year);
+      PREV = stats(year - 1);
+      const me = getSession();
+      const admin = isAdmin();
+      const df = deptFacts();
+      const n = monthsSoFar();
+      const cur = upTo(S, n), prev = upTo(PREV, n);
+      const dClaims = delta(cur.c, prev.c);
+      const dCredit = delta(cur.v, prev.v);
+      const typesShown = typesExpanded ? S.types : S.types.slice(0, TYPES_TOP);
+      const openItems = queue().length;
+
+      const kpis = [
+        ['Claims raised', num(S.total), dClaims ? `<span class="${dClaims.up ? 'up' : 'dn'}">${dClaims.txt}</span>` : '<span class="flat">–</span>'],
+        ['Credit given', usd(S.credit), dCredit ? `<span class="${dCredit.up ? 'up' : 'dn'}">${dCredit.txt}</span>` : '<span class="flat">–</span>'],
+        ['Still open', num(S.unresolved), `<span class="up">${pct(S.unresolved, S.total)}</span>`]
+      ];
+
+      const moneyDepts = df.slice().sort((a, b) => b[6] - a[6]).slice(0, 8)
+        .map((d) => ({ dept: d[0], credit: d[6], memo: d[8] }));
+      const memoGap = df.reduce((a, d) => a + (d[6] - d[8]), 0);
+
+      const RATES = {
+        open: { label: 'Still open', of: (d) => d[5], den: (d) => d[3] },
+        repeat: { label: 'Repeat orders', of: (d) => d[9], den: (d) => d[4] },
+        free: { label: 'Cost nothing', of: (d) => d[10], den: (d) => d[3] }
+      };
+      const rk = RATES[rateMetric];
+      const rateRows = df
+        .filter((d) => rk.den(d) >= 10)
+        .map((d) => ({ d, v: pnum(rk.of(d), rk.den(d)) }))
+        .sort((a, b) => b.v - a.v)
+        .slice(0, 10);
+      const rateAvg = pnum(df.reduce((a, d) => a + rk.of(d), 0), df.reduce((a, d) => a + rk.den(d), 0));
+
+      document.getElementById('app').innerHTML = `
+        <div class="row" style="margin-bottom:6px">
+          <div><h1>Claims Dashboard</h1><span class="mu">${esc(S.range)} · ${num(S.total)} claims · ${usd(S.credit)}</span></div>
+          <div class="sp"></div>
+          <div class="dropdown">
+            <button class="dd-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"
+              onclick="return yearMenu(this)">${year}<span class="dd-caret">▾</span></button>
+            <div class="dd-menu year-menu" role="listbox" aria-label="Reporting year">
+              ${YEARS.map((y) => `
+                <button type="button" role="option" aria-selected="${year === y}" class="${year === y ? 'on' : ''}"
+                  onclick="setYear(${y})">${y}${y === year ? '<span class="mu">current</span>' : ''}</button>`).join('')}
+            </div>
+          </div>
+          <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
+        </div>
+
+        ${sect('What Needs Your Attention', '', `<span class="b High">${num(openItems)} open</span>`)}
+        ${renderFindings()}
+
+        <div class="split"></div>
+
+        ${sect('The Three Numbers That Matter')}
+        <div class="grid g4">
+          ${kpis.map(([label, value, note]) => `
+            <div class="card kpi">
+              <small>${label}</small><b>${value}</b>${note}
+            </div>`).join('')}
+        </div>
+
+        ${sect('This Year vs Last Year', `${MONTHS[0]}–${MONTHS[n - 1]} of both years`)}
+        <div class="grid g2">
+          <div class="card">
+            ${cardTitle('Claims per month', '', `<span class="mgd ${cur.c > prev.c ? 'up' : 'dn'}" style="margin-top:0">${cur.c > prev.c ? '+' : '−'}${Math.abs(((cur.c - prev.c) / (prev.c || 1)) * 100).toFixed(1)}%</span>`)}
+            ${monthCompare(n, num, num, 0)}
+          </div>
+          <div class="card">
+            ${cardTitle('Credit per month', '', `<span class="mgd ${cur.v > prev.v ? 'up' : 'dn'}" style="margin-top:0">${cur.v > prev.v ? '+' : '−'}${Math.abs(((cur.v - prev.v) / (prev.v || 1)) * 100).toFixed(1)}%</span>`)}
+            ${monthCompare(n, usd, usdK, 1)}
+          </div>
+        </div>
+
+        ${sect('Where the Claims Come From')}
+        <div class="grid g3">
+          <div class="card">
+            ${cardTitle('Claims by team area', '')}
+            ${donut('area', S.area)}
+          </div>
+          <div class="card">
+            ${cardTitle('Top claim types', '', seg('types', 'Count', 'Credit'))}
+            ${hbar('types', typesShown)}
+            <div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${typesShown.length} of ${S.types.length} · ${pct(typesShown.reduce((a, t) => a + t[1], 0), S.total)}</span>
+              <div class="sp"></div>
+              <button class="btn s" onclick="toggleTypes()">${typesExpanded ? '— Top 10' : `+ ${S.types.length - TYPES_TOP}`}</button>
+            </div>
+          </div>
+          <div class="card">
+            ${cardTitle('Credit by department', '', seg('dept', 'Count', 'Credit'))}
+            ${hbar('dept', df.slice(0, DEPT_TOP).map((d) => [d[0], d[3], d[6]]))}
+            <div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${Math.min(DEPT_TOP, df.length)} of ${df.length} · ${usd(df.reduce((a, d) => a + d[6], 0))}</span>
+            </div>
+          </div>
+        </div>
+
+        ${sect('Where the Money Goes')}
+        <div class="grid g2">
+          <div class="card">
+            ${cardTitle('Credit given vs memo sent', '', '<span class="b ' + (memoGap > 0 ? 'High' : 'Low') + '">' + (memoGap > 0 ? usd(memoGap) + ' gap' : 'no gap') + '</span>')}
+            ${pairBars(moneyDepts, ['Credit given', 'Credit memo sent'])}
+            <div class="legend row">
+              <span><i style="background:#6366f1"></i> Credit given</span>
+              <span><i style="background:#e8a13a"></i> Memo sent</span>
+            </div>
+          </div>
+          <div class="card">
+            ${cardTitle('How big are the claims', '')}
+            ${S.dist.length ? vbarFixed(S.dist, 1, 2, usd) : '<p class="mu">No credited claims.</p>'}
+            <div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${num(S.noCredit)} of ${num(S.total)} cost nothing (${pct(S.noCredit, S.total)})</span>
+            </div>
+          </div>
+        </div>
+
+        ${sect('What Is Still Going Wrong')}
+        <div class="card">
+          ${cardTitle('Problem rate by department', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
+          <div class="rates">
+            ${rateRows.map(({ d, v }) => `
+              <div class="hb wide" onclick="jump('de','${esc(d[0])}')" style="cursor:pointer" title="Open claims in ${esc(d[0])}">
+                <div>${esc(d[0])}</div>
+                <div class="trk"><span style="width:${Math.min(100, v).toFixed(1)}%;background:${v > rateAvg ? 'linear-gradient(90deg,#d9534f,#f0a09a)' : 'linear-gradient(90deg,#6366f1,#8b93f8)'}"></span></div>
+                <b>${v.toFixed(1)}%</b>
+              </div>`).join('')}
+          </div>
+          <div class="row" style="margin-top:10px">
+            <span class="mu" style="font-size:12px">Red = above the ${rateAvg.toFixed(1)}% average · min 10 claims</span>
+            <div class="sp"></div>
+            <span class="b Low">Click a row</span>
+          </div>
+        </div>
+
+        <div class="card" id="attention" style="margin-top:24px;scroll-margin-top:80px">
+          ${cardTitle('Open Claims', `${num(openItems)} in ${year}`, `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
+          ${renderAttention()}
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAuth()) return;
+      document.body.innerHTML = layout('dashboard');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Claim Detail</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    function optionList(options, selected) {
+      return options
+        .map((x) => `<option ${x === selected ? 'selected' : ''}>${x}</option>`)
+        .join('');
+    }
+
+    // Chip rows are grouped so the three kinds of information never mix.
+    //  pg = where the claim sits in the workflow   is = what is wrong
+    //  fi = what it costs and what was refunded
+    function chipRow(chips) {
+      return (
+        '<div class="crow">' +
+        chips
+          .map(([label, value, kind]) =>
+            `<span class="cchip${kind ? ' ' + kind : ''}">${label}${value ? ' <small>' + value + '</small>' : ''}</span>`
+          )
+          .join('') +
+        '</div>'
+      );
+    }
+
+    function chipGroup(cls, title, blurb, chips) {
+      return (
+        `<div class="chips ${cls}"><h4>${title}</h4>` +
+        (blurb ? `<p>${blurb}</p>` : '') +
+        chipRow(chips) +
+        `</div>`
+      );
+    }
+
+    function render() {
+      const params = new URLSearchParams(location.search);
+      const wanted = params.get('id');
+      const found = CLAIMS.find((c) => c.id === wanted);
+
+      // A manager asking for someone else's case gets a refusal, not the case.
+      if (found && !canSee(found.own)) {
+        document.getElementById('app').innerHTML = `
+          <h1 style="margin-bottom:8px">Case not available</h1>
+          <div class="card">
+            <p class="mu">Claim <b>#${esc(wanted)}</b> is owned by ${esc(ownerName(found.own))}, not by you.
+            Managers can only open cases in their own caseload.</p>
+            <div class="row" style="gap:8px;margin-top:12px">
+              <a class="btn p s" href="dashboard.html">Back to my dashboard</a>
+              ${isAdmin() ? `<a class="btn s" href="admin-dashboard.html">Open Admin Dashboard</a>` : ''}
+            </div>
+          </div>`;
+        return;
+      }
+
+      // No id, or an id that does not exist: never fall back to an arbitrary case.
+      if (!found) {
+        document.getElementById('app').innerHTML = `
+          <h1 style="margin-bottom:8px">Case not found</h1>
+          <div class="card">
+            <p class="mu">${wanted
+              ? `No claim matches <b>#${esc(wanted)}</b> in the worked examples.`
+              : 'No claim was requested. Open a case from your list to see its details.'}</p>
+            <div class="row" style="gap:8px;margin-top:12px">
+              <a class="btn p s" href="claims.html">Back to my claims</a>
+              <a class="btn s" href="dashboard.html">My dashboard</a>
+            </div>
+          </div>`;
+        return;
+      }
+
+      const claim = found;
+      const suggestion = AI_SUGGESTIONS[claim.ty] || AI_SUGGESTIONS.default;
+      const order = ORDERS.find((o) => o[0] === claim.or) || null;
+      const fin = CLAIM_FINANCIALS[claim.id] || {};
+
+      const dd = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
+      const or = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : v);
+      const fmtDate = (d) => (d ? esc(String(d).slice(0, 10)) : '—');
+
+      // Status is derived from the Resolved / Denied / Cancelled flags, so the
+      // trace can only mark the step the flags actually prove.
+      const traceStep = { Open: 0, Denied: 10, Cancelled: 10, Resolved: 10 }[claim.st] ?? 0;
+      const STEPS = ['Claim', 'Order', 'Department', 'Investigation', 'Root cause', 'Resolution', 'Closure'];
+      const trace = STEPS
+        .map((step, i) => `<span class="${i === traceStep ? 'cur' : ''}">${step}</span>`)
+        .join('');
+
+      document.getElementById('app').innerHTML = `
+        <a class="mu" style="cursor:pointer" href="claims.html">← Claims</a>
+        <div class="row" style="margin:8px 0 14px">
+          <h1>${claim.id}</h1>
+          <span class="mu">${esc(claim.own_by || 'unknown raiser')} ·</span>
+          <span class="owner-chip ${(OWNERS.find((o) => o.id === claim.own) || {}).role === 'Admin' ? 'adm' : 'mgr'}"><i></i>Owner: ${esc(ownerName(claim.own))}</span>
+          <div class="sp"></div>
+          <h1>${money(claim.am)}</h1>
+        </div>
+
+        <div class="trace" style="margin-bottom:16px">${trace}</div>
+
+        <div class="card" style="margin-bottom:16px">
+          <h3>Claim at a glance</h3>
+          ${chipGroup('pg', 'Progress', 'Where this claim sits, based on the Resolved / Denied / Cancelled flags in the export.', [
+            ['Status', claim.st, 'k'],
+            ['Raised', fmtDate(claim.date), ''],
+            ['Resolved', claim.rdate ? fmtDate(claim.rdate) : '—', ''],
+            ['Entry finished', claim.entryFinished ? 'Yes' : 'No', claim.entryFinished ? '' : 'k']
+          ])}
+          ${chipGroup('is', 'Issue', 'What was claimed, and the department routed to own it.', [
+            ['Type', claim.ty, 'k'],
+            ['Department', claim.de, ''],
+            ['Area', claim.ar, ''],
+            ['Priority', claim.pr, ''],
+            ['AI suggestion', claim.ai === 'acc' ? 'Accepted' : claim.ai === 'sug' ? 'Pending' : 'Not generated', '']
+          ])}
+          ${chipGroup('fi', 'Financial', 'Credit recorded on the claim, and what was actually refunded.', [
+            ['Claim credit', money(claim.am), 'money'],
+            ['Credit memo', or(fin.creditMemo, 'Not raised'), 'v'],
+            ['Memo amount', fin.creditMemoAmount ? money(fin.creditMemoAmount) : '—', 'money'],
+            ['Memo date', fmtDate(fin.creditMemoDate), ''],
+            ['Credited against', or(fin.creditForInvoice, '—'), 'v']
+          ])}
+        </div>
+
+        <div class="grid g2">
+          <div class="card"><h3>1 · Claim Overview</h3>
+            <dl class="dl">
+              ${dd('Claim ID', claim.id)}
+              ${dd('Order ID', claim.or ? `<a style="color:var(--pr)" href="orders.html">${esc(claim.or)}</a>` : '—')}
+              ${dd('Order type', or(claim.otype, '—'))}
+              ${dd('Claim date', fmtDate(claim.date))}
+              ${dd('Description', esc(or(claim.ds, 'No description recorded.')))}
+              ${dd('Claim type', esc(claim.ty))}
+              ${dd('Department', esc(claim.de))}
+              ${dd('Raised by', esc(or(claim.own_by, '—')))}
+              ${dd('Credit amount', money(claim.am))}
+            </dl>
+            <p class="mu" style="font-size:11px;margin:12px 0 0">
+              The export has no customer-name, evidence or attachment columns, so those are not shown.
+            </p>
+          </div>
+          <div class="card"><h3>2 · Related Order</h3>
+            ${order ? `
+            <div class="fin">
+              <div><em>Claims on order</em><b>${num(order[1])}</b></div>
+              <div><em>Total credit</em><b class="pos">${money(order[2])}</b></div>
+              <div><em>Still open</em><b>${num(order[3])}</b></div>
+            </div>
+            <dl class="dl">
+              ${dd('Order ID', `<a style="color:var(--pr)" href="orders.html">${order[0]}</a>`)}
+              ${dd('Order type', esc(order[7] || 'Customer Order'))}
+              ${dd('Claims raised', num(order[1]))}
+              ${dd('Departments involved', num(order[4]))}
+              ${dd('Claim window', `${esc(order[5])} → ${esc(order[6])}`)}
+              ${dd('Routed owners', esc((order[8] || '').split('~').map((id) => ownerName(id)).join(', ') || '—'))}
+            </dl>` : `<p class="mu">Order <b>${esc(claim.or || '—')}</b> is not in the embedded order set
+              (only orders that raised a repeat or open claim are carried in the page data).</p>`}
+            <p class="mu" style="font-size:11px;margin:12px 0 0">
+              The claims export contains only the OrderID. Product, quantity, unit price, artwork,
+              batch, supplier and carrier are not available, so no order value can be shown.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid g2" style="margin-top:16px">
+          <div class="card"><h3>3 · Investigation &amp; RCA</h3>
+            <dl class="dl">
+              ${dd('Root cause (export)', or(fin.rootCause, 'Not recorded'))}
+              ${dd('Proposed solution (export)', or(fin.proposedSolution, 'Not recorded'))}
+              ${dd('Corrective action (export)', or(fin.correctiveAction, 'Not recorded'))}
+              ${dd('Preventive action (export)', or(fin.preventiveAction, 'Not recorded'))}
+              ${dd('Note for customer', esc(or(fin.note, 'None')))}
+            </dl>
+            <p class="mu" style="font-size:11px;margin:12px 0 0">
+              These are the values in the export, shown verbatim. Root cause is blank on
+              ${pct(DATA_QUALITY.total - DATA_QUALITY.rcaFilled, DATA_QUALITY.total)} of all claims, so most
+              claims have no cause to review.
+            </p>
+          </div>
+
+          <div class="card" style="border-color:var(--pr)"><h3>4 · ✨ AI Assistance <span class="b">AI Suggestion</span></h3>
+            <p class="mu" style="margin:0 0 10px;font-size:12px">AI provides suggestions. The Manager makes the final decision.</p>
+            <dl class="dl">
+              ${dd('Classification', `${esc(claim.ty)} · ${esc(claim.de)}`)}
+              ${dd('Summary', esc(or(claim.ds, 'No description recorded.')))}
+              ${dd('Possible cause', esc(suggestion[0]))}
+              ${dd('Resolution', esc(suggestion[1]))}
+              ${dd('Based on', 'Generic investigation checklist for this claim type — no historical model')}
+            </dl>
+            <div class="row" style="margin-top:12px">
+              <button class="btn p" onclick="toast('Suggestions accepted into RCA & CAPA')">Accept</button>
+              <button class="btn" onclick="toast('Edit suggestions')">Edit</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g2" style="margin-top:16px">
+          <div class="card"><h3>5 · Claim Assessment</h3>
+            <div class="grid g2">
+              <div><label class="mu">Financial impact</label><br><input value="${money(claim.am)}" style="width:100%"></div>
+              <div><label class="mu">Entry finished</label><br><input value="${claim.entryFinished ? 'Yes' : 'No'}" style="width:100%"></div>
+            </div>
+            <p class="mu" style="font-size:11px;margin:12px 0 0">
+              Validity, responsibility and affected quantity are not columns in the export, so they
+              are not pre-filled.
+            </p>
+          </div>
+          <div class="card"><h3>6 · Resolution &amp; CAPA</h3>
+            <label class="mu">Resolution</label><br>
+            <select style="margin-bottom:10px">${optionList(['Credit', 'Refund', 'Replacement', 'Rework', 'Reship', 'Partial Credit', 'No Action'], 'Rework')}</select>
+            <label class="mu">Corrective Action</label>
+            <textarea>${esc(or(fin.correctiveAction, ''))}</textarea>
+            <label class="mu">Preventive Action</label>
+            <textarea>${esc(or(fin.preventiveAction, ''))}</textarea>
+            <button class="btn s" onclick="toast('CAPA saved')">Save CAPA</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:20px">
+          <div class="sp"></div>
+          <button class="btn" onclick="toast('Saved')">Save</button>
+          <button class="btn" onclick="toast('Claim closed')">Close Claim</button>
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAuth()) return;
+      document.body.innerHTML = layout('claims');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>
