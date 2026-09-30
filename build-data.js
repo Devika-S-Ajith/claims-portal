@@ -79,6 +79,51 @@ const AREA_OF_DEPT = {
   '(Unassigned)': 'Unassigned'
 };
 
+// --------------------------------------------------------------- department
+// The export's own department columns (Art, Production, OrderChange, ...,
+// Quoting) are the literal value "0" on every row - empty placeholders. The
+// only populated field is ClaimDept, which carries 47 different spellings
+// (Customer Goodwill, Order Processing, Sales Tax, ...). `add-warehouse.js`
+// collapses those 47 onto the nine departments the portal reports on and writes
+// the result into the CSV as `Department`, so this build just reads it.
+const DEPARTMENTS = [
+  ['Art', 'Art & Imprint'],
+  ['Production', 'Production & Quality'],
+  ['OrderChange', 'Order Change'],
+  ['Shipping', 'Shipping & Courier'],
+  ['Invoicing', 'Invoicing & Billing'],
+  ['Pricing', 'Pricing'],
+  ['Overseas', 'Overseas'],
+  ['CustomerService', 'Customer Service'],
+  ['Quoting', 'Quoting']
+];
+const DEPT_LABEL = Object.fromEntries(DEPARTMENTS);
+
+// The nine departments collapse 47 source spellings, so ownerOf(dept) can no
+// longer resolve - the keys here are department names, not ClaimDept values.
+// Each department is routed to whichever owner held the most of the source
+// spellings that map into it, read off OWNER_OF_DEPT above. This is derived
+// from the parsed claims (see OWNER_OF_NINED below) rather than asserted by
+// hand, so it cannot drift from the export. Overseas has no rows in this file
+// and is left unassigned rather than given an invented owner.
+
+// ---------------------------------------------------------------- warehouse
+// The export carries no warehouse column either. `add-warehouse.js` appends one
+// (A-F) modelling where the product was sitting when the fault was found: a
+// warehouse holds one kind of stock, so the product family decides the site.
+// That is what makes "which warehouse had the most defects" a real question -
+// a print fault belongs to the print warehouse, not to the desk that logged it.
+// Overseas has no rows in this export; it is kept in DEPARTMENTS so the picker
+// matches the required list, and its block is simply empty.
+const WAREHOUSES = [
+  ['A', 'Main store - general goods'],
+  ['B', 'Art & print'],
+  ['C', 'Drinkware & fragile'],
+  ['D', 'Finished goods & overflow'],
+  ['E', 'Dispatch & courier'],
+  ['F', 'Order desk & service']
+];
+
 // Three coarse bands, which is all a reader needs to see: most claims are small
 // claims, and the money sits in the handful above $500. The finer five-band
 // split that used to be here answered no question anyone was asking.
@@ -120,8 +165,12 @@ const claims = rows.slice(1)
       id: g(r, 'Claim#'),
       order: g(r, 'OrderID'),
       otype: g(r, 'OrderType') || 'Customer Order',
-      dept: dept || '(Unassigned)',
-      rawDept: dept,
+      // The nine-department view, from the CSV column add-warehouse.js wrote.
+      dept: g(r, 'Department') || 'OrderChange',
+      // The export's own 47-spelling department, kept for the legacy per-dept
+      // views on the claims dashboard, which still read `rawDept`.
+      rawDept: dept || '(Unassigned)',
+      wh: g(r, 'Warehouse') || 'A',
       type: g(r, 'ClaimType') || '(Unclassified)',
       desc: g(r, 'ClaimDescription'),
       rca: g(r, 'RootCauseAnalysis'),
@@ -172,11 +221,36 @@ const FLAGS = (c) => {
   return f;
 };
 
-const ownerOf = (dept) => OWNER_OF_DEPT[dept] || 'MP';
+// `dept` is now one of the nine, so route on those; `rawDept` keeps the export's
+// own spelling for the per-department views that still group on it.
+const ownerOf = (dept) => OWNER_OF_NINED[dept] || OWNER_OF_DEPT[dept] || 'MP';
 const areaOf = (dept) => AREA_OF_DEPT[dept] || 'Unassigned';
 
 // ---------------------------------------------------------------- stats
 const r2 = (n) => Math.round(n * 100) / 100;
+
+// Which of the export's own owners holds most of each of the nine departments.
+// Counted over the parsed claims rather than asserted by hand, so the routing
+// cannot drift from the data. `rawDept` still carries the export's own spelling,
+// which is the key OWNER_OF_DEPT is written in.
+const OWNER_OF_NINED = (() => {
+  const tally = new Map();
+  for (const c of claims) {
+    const o = OWNER_OF_DEPT[c.rawDept];
+    if (!o) continue;
+    const k = c.dept + '|' + o;
+    tally.set(k, (tally.get(k) || 0) + 1);
+  }
+  const best = new Map();
+  for (const [k, n] of tally) {
+    const [dept, o] = k.split('|');
+    const cur = best.get(dept);
+    if (!cur || n > cur.n) best.set(dept, { o, n });
+  }
+  const out = {};
+  for (const [key] of DEPARTMENTS) out[key] = best.get(key) ? best.get(key).o : '';
+  return out;
+})();
 
 function block(list, label) {
   const total = list.length;
@@ -283,6 +357,7 @@ function block(list, label) {
     sampleClaims: list.filter((c) => c.otype === 'Sample').length,
     status: by((c) => c.status),
     area: by((c) => areaOf(c.dept)),
+    whs: by((c) => c.wh),
     dist,
     types: by((c) => c.type),
     typeMonths,
@@ -397,6 +472,68 @@ for (const y of YEARS) {
 }
 for (const o of OWNERS) DEPT_FACTS.all[o.id] = DEPT_FACTS.all.all.filter((d) => d[1] === o.id);
 console.log('dept fact rows:', Object.values(DEPT_FACTS).reduce((s, m) => s + m.all.length, 0));
+
+// ---------------------------------------------------------------- scoped blocks
+// The main year blocks are cut by owner only, so a page cannot repoint a figure
+// at one department without re-aggregating the whole export in the browser.
+// These are the same block() emitted once per scope, so choosing a location or
+// a department on the scoped page is a lookup rather than a computation, and the
+// answer is identical to the one the build script would produce.
+//
+// Scope keys: 'all', 'loc:<L>' for each location, 'dept:<ClaimDept>'. There is
+// no owner dimension - a department already routes to exactly one owner, so an
+// owner slice of a department is the department.
+//
+// The inner lists are trimmed harder than the year blocks. A scoped page ranks
+// its own contents, so the 13th claim type in a department is never displayed,
+// and 300+ of these blocks would otherwise dominate the file.
+const slim = (b) => {
+  b.types = b.types.slice(0, 12);
+  b.dept = b.dept.slice(0, 12);
+  b.whs = b.whs.slice(0, 12);
+  b.typeMonths = b.typeMonths.slice(0, 8);
+  return b;
+};
+
+const SCOPED_STATS = {};
+for (const y of YEARS) {
+  const list = claims.filter((c) => c.y === y);
+  const scopes = { all: list };
+  for (const c of list) {
+    const wk = 'wh:' + c.wh;
+    if (!scopes[wk]) scopes[wk] = [];
+    scopes[wk].push(c);
+  }
+  for (const c of list) {
+    const dk = 'dept:' + c.dept;
+    if (!scopes[dk]) scopes[dk] = [];
+    scopes[dk].push(c);
+  }
+  SCOPED_STATS[y] = {};
+  for (const [k, rows] of Object.entries(scopes)) {
+    const name = k.slice(k.indexOf(':') + 1);
+    const b = slim(block(rows, rows === list ? ('Jan - Sep ' + y) : name + ' · ' + y));
+    b.scope = k;
+    // A department draws from several warehouses, so it has no single one: the
+    // first claim's warehouse would be an accident. The company-wide block must
+    // not claim one either - a page that reads scopeWh to filter would then show
+    // a sixth of the claims. The page reads `whs` (the ranked list) instead.
+    b.scopeWh = k.startsWith('wh:') ? name : '';
+    b.scopeDept = k.startsWith('dept:') ? name : '';
+    SCOPED_STATS[y][k] = b;
+  }
+}
+console.log('scoped blocks:', Object.values(SCOPED_STATS).reduce((s, m) => s + Object.keys(m).length, 0));
+
+// The department picker, in the fixed order the portal reports on, so the page
+// never has to guess one and never reorders between renders. Every department in
+// DEPARTMENTS is listed even when it has no claims in the export (Overseas), so
+// the page can say so instead of the option silently vanishing.
+const DEPT_INDEX = DEPARTMENTS.map(([key, label]) =>
+  [key, label, claims.filter((c) => c.dept === key).length, OWNER_OF_NINED[key] || '']);
+console.log('departments indexed:', DEPT_INDEX.length,
+  '| empty:', DEPT_INDEX.filter((d) => !d[2]).map((d) => d[0]).join(', ') || 'none',
+  '| routing:', DEPT_INDEX.map((d) => d[0] + '=' + (d[3] || '-')).join(' '));
 
 // ---------------------------------------------------------------- queue
 const QUEUE_SRC = claims.filter(needsAction)
@@ -527,18 +664,21 @@ const DQ = (() => {
 // ---------------------------------------------------------------- emit
 const J = (v) => JSON.stringify(v);
 // Keys are emitted in a stable order; `range` is part of the block and is used
-// by every page header, so it must not be dropped.
+// by every page header, so it must not be dropped. `extra` appends keys that
+// only some blocks carry (the scoped ones label themselves), after the
+// standard list and after the same missing-key check has run.
 const BLOCK_KEYS = ['range', 'modelled', 'total', 'credit', 'avgCredit', 'credited', 'creditIssued',
   'memos', 'maxClaim', 'resolved', 'open', 'cancelled', 'denied', 'unresolved', 'unfinished',
       'noRca', 'rcaFilled', 'capaFilled', 'paFilled', 'unassigned', 'repeatOrders', 'repeatClaims', 'repeatCredit',
   'medianDays', 'p90Days', 'sameDayPct', 'resolvedTimed', 'raisers',
   'orders', 'orderClaims', 'multiOrders', 'claimsPerOrder', 'repeatRate', 'noCredit', 'sampleClaims',
-  'status', 'area', 'dist', 'types', 'typeMonths', 'dept', 'months'];
-const fmtBlock = (b, indent) => {
+  'status', 'area', 'whs', 'dist', 'types', 'typeMonths', 'dept', 'months'];
+const fmtBlock = (b, indent, extra) => {
   const missing = BLOCK_KEYS.filter((k) => !(k in b));
   if (missing.length) throw new Error('stat block missing keys: ' + missing.join(', '));
-  return '{\n' + BLOCK_KEYS
-    .map((k) => indent + '  ' + k + ': ' + J(b[k]))
+  const keys = BLOCK_KEYS.concat(extra ? Object.keys(extra) : []);
+  return '{\n' + keys
+    .map((k) => indent + '  ' + k + ': ' + J(BLOCK_KEYS.includes(k) ? b[k] : extra[k]))
     .join(',\n') + '\n' + indent + '}';
 };
 
@@ -619,6 +759,38 @@ out.push('// Per-department rates, so cost and open-rate can be compared per tea
 out.push('// Keyed by year (or "all"), then by the owner the department routes to.');
 out.push('// [dept, owner, area, claims, orders, open, credit, openCredit, creditIssued, repeatOrders, noCredit]');
 out.push('const DEPT_FACTS = ' + J(DEPT_FACTS) + ';');
+out.push('');
+out.push('// ---- warehouses ----');
+out.push('// The export has no warehouse column. add-warehouse.js appends one (A-F)');
+out.push('// modelling where the product was sitting when the fault was found - a');
+out.push('// warehouse holds one kind of stock, so the product family decides the');
+out.push('// site. Replace this the moment a real warehouse feed exists.');
+out.push('const WAREHOUSES = ' + J(WAREHOUSES) + ';');
+out.push('// The nine departments the portal reports on, in fixed order.');
+out.push('const DEPARTMENTS = ' + J(DEPARTMENTS) + ';');
+out.push('// [key, label, claimCount, routedOwner] - the picker list for the department');
+out.push('// page. Listed even when empty, so an absent option is a visible fact.');
+out.push('const DEPT_INDEX = ' + J(DEPT_INDEX) + ';');
+out.push('');
+out.push('// ---- scoped stat blocks ----');
+out.push('// The same block() the dashboards use, emitted once per scope so a page can');
+out.push('// repoint every figure at a warehouse or a department. Keys: "all",');
+out.push('// "wh:<W>", "dept:<department>". A block carries its own `scope`, `scopeWh`');
+out.push('// and `scopeDept` so the page can label itself without a lookup table. A');
+out.push('// department spans warehouses, so its `scopeWh` is empty by design - read');
+out.push('// `whs`, the ranked list, instead.');
+out.push('const SCOPED_STATS = {');
+YEARS.forEach((y, i) => {
+  out.push('  ' + JSON.stringify(y) + ': {');
+  const keys = Object.keys(SCOPED_STATS[y]);
+  keys.forEach((k, j) => {
+    const b = SCOPED_STATS[y][k];
+    out.push('    ' + JSON.stringify(k) + ': ' + fmtBlock(b, '    ',
+      { scope: b.scope, scopeWh: b.scopeWh, scopeDept: b.scopeDept }) + (j < keys.length - 1 ? ',' : ''));
+  });
+  out.push('  }' + (i < YEARS.length - 1 ? ',' : ''));
+});
+out.push('};');
 out.push('');
 out.push('// Measured gaps in the export, quoted by the admin dashboard.');
 out.push('const DATA_QUALITY = ' + J(DQ) + ';');

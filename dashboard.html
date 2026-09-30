@@ -103,24 +103,61 @@ let queueSearch = '';
     }
 
     // ---------- charts ----------
+    // Donut plus a per-team-area breakdown. This card shares a grid row with two
+    // ten-row bar lists, so a bare donut and a three-line legend left most of the
+    // card blank. The breakdown reuses the arc colours, adds a share bar per area
+    // and calls out the area that dominates, which is the thing a reader is
+    // actually looking for. The card itself is a flex column (.dcard) so the
+    // breakdown can absorb whatever height the neighbouring cards set.
     function donut(key, data) {
-      const i = metric[key] === 'value' ? 2 : 1;
-      const total = data.reduce((s, d) => s + d[i], 0) || 1;
+      if (!data.length) return '<p class="mu">No claims in this year.</p>';
+      const byValue = metric[key] === 'value';
+      const i = byValue ? 2 : 1;
+      const color = (n) => COLORS[n % COLORS.length];
+      const countTotal = data.reduce((s, d) => s + d[1], 0) || 1;
+      const total = byValue ? data.reduce((s, d) => s + d[2], 0) : countTotal;
+      const credit = data.reduce((s, d) => s + (d[2] || 0), 0);
+
       let offset = 25;
       const arcs = data.map((d, n) => {
         const p = (d[i] / total) * 100;
-        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${COLORS[n % COLORS.length]}" stroke-width="6" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="${offset}"><title>${esc(d[0])}: ${fmt(key, d[i])} (${p.toFixed(1)}%)</title></circle>`;
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${color(n)}" stroke-width="6" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="${offset}"><title>${esc(d[0])}: ${fmt(key, d[i])} (${p.toFixed(1)}%)</title></circle>`;
         offset -= p;
         return arc;
       }).join('');
-      const legend = data.map((d, n) =>
-        `<div><i style="background:${COLORS[n % COLORS.length]}"></i>${esc(d[0])}<em>${fmt(key, d[i])} · ${pnum(d[i], total).toFixed(1)}%</em></div>`
-      ).join('');
-      const center = metric[key] === 'value' ? usd(total) : num(total);
+
+      const rows = data.map((d, n) => `
+          <div class="drow">
+            <div class="dline">
+              <span class="dlbl"><i style="background:${color(n)}"></i><span title="${esc(d[0])}">${esc(d[0])}</span></span>
+              <b>${fmt(key, d[i])}</b><em>${pnum(d[i], total).toFixed(1)}%</em>
+            </div>
+            <div class="trk"><span style="width:${pnum(d[i], total).toFixed(1)}%;background:${color(n)}"></span></div>
+          </div>`).join('');
+
+      // Data arrives ordered by count, but the toggle can rank it by credit, so
+      // the callout is picked by the measure actually on screen.
+      const lead = data.reduce((a, d) => (!a || d[i] > a[i] ? d : a), null);
+      const leadPct = lead ? pnum(lead[i], total) : 0;
+      const callout = lead
+        ? leadPct >= 50
+          ? `<span class="b High">${esc(lead[0])} carries ${leadPct.toFixed(0)}%</span><span class="mu">biggest team area</span>`
+          : `<span class="mu">Biggest: <b>${esc(lead[0])}</b> · ${leadPct.toFixed(1)}%</span>`
+        : '';
+
+      const center = byValue ? usd(total) : num(total);
       return (
-        `<div class="row"><svg class="donut" width="126" height="126" viewBox="0 0 42 42" role="img" aria-label="Share of claims">${arcs}` +
-        `<text x="21" y="23" text-anchor="middle" font-size="${metric[key] === 'value' ? 6 : 7}" font-weight="600" fill="currentColor">${center}</text></svg>` +
-        `<div class="legend">${legend}</div></div>`
+        `<div class="dtop">
+            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of claims">${arcs}` +
+            `<text x="21" y="23" text-anchor="middle" font-size="${byValue ? 6 : 7}" font-weight="600" fill="currentColor">${center}</text></svg>
+            <div class="dtot">
+              <div><span class="mu">Claims</span><em>${num(countTotal)}</em></div>
+              <div><span class="mu">Credit</span><em>${usd(credit)}</em></div>
+              <div><span class="mu">Team areas</span><em>${num(data.length)}</em></div>
+            </div>
+          </div>
+          <div class="dlist">${rows}</div>
+          <div class="dfoot">${callout}</div>`
       );
     }
 
@@ -283,33 +320,24 @@ let queueSearch = '';
       return false;
     }
 
-    // ---------- the panel: volume + value cards, then AI insights ----------
-    // Two groups, because they answer different questions.
-    //   ai   - what the numbers mean. Four patterns, each computed from the
-    //           monthly claim-type series, never from a model.
-    //   card - what the numbers are. Total / open / resolved / awaiting action
-    //           / repeat orders. Each count links to the claims behind it,
-    //           except the whole-year totals which have nothing to filter to.
+    // ---------- the panel: one prioritised feed ----------
+    // A single list, sorted by how urgent each item is. Where the card came from
+    // no longer decides where it sits: an AI-detected pattern and a plain metric
+    // are interleaved by priority, because a standing fault and a queue of
+    // unfinished entries are both just work. The origin is still carried, but
+    // only as a label on the card, so a reader can tell what to investigate from
+    // what to work through.
+    //   prio - 1 Do First, 2 Do Next, 3 Review. The only sort key that matters.
+    //   w    - weight, breaks ties inside a priority tier.
+    //   src  - 'ai' or 'metric'; drives the source tag and nothing else.
+    //   go   - the verb on the button. Every card opens the same table, so the
+    //          verb has to say what the reader will find there.
+    // Whole-year totals (total raised, resolved) are deliberately absent: they
+    // have no filter to open and nothing to pick up, so they live in the KPI
+    // tiles once rather than sitting in a priority queue.
     // Source columns and definitions for every card are in DASHBOARD.md.
-    const SEV = { 1: ['Do first', 'p1'], 2: ['Do next', 'p2'], 3: ['For context', 'p3'] };
-    const GROUPS = [
-      ['ai', 'AI suggestions', 'Patterns the data shows'],
-      ['card', 'The numbers', 'Volume, value and what is still outstanding']
-    ];
-
-    // 12-point sparkline of a monthly series, so a standing fault is visible
-    // rather than something the reader has to take on trust.
-    function spark(ms, n) {
-      const vals = ms.slice(0, n);
-      if (vals.length < 2) return '';
-      const max = Math.max(...vals, 1);
-      const w = 100, h = 30;
-      const x = (i) => (i * w) / (vals.length - 1);
-      const y = (v) => h - 4 - (v / max) * (h - 9);
-      const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-      const dots = vals.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="1.7"/>`).join('');
-      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/>${dots}</svg>`;
-    }
+    const PRIO = { 1: ['Do First', 'p1'], 2: ['Do Next', 'p2'], 3: ['Review', 'p3'] };
+    const SRC = { ai: ['AI Insight', 'sai'], metric: ['Metric', 'smetric'] };
 
     // Four insights, all measured off S.typeMonths (the top 12 claim types by
     // yearly count, each with its 12 monthly counts) plus the scoped year block.
@@ -347,9 +375,10 @@ let queueSearch = '';
       if (topChronic) {
         const c = chronic.find((s) => s.t === topChronic);
         out.push({
-          group: 'ai', rank: 1, label: 'Recurring issue', n: c.total, kind: 'ty', value: c.t,
-          v1: usd(creditOf(c.t)), v2: `${c.t} in ${c.inMonths} of ${n} months`,
-          spark: c.ms, nMonths: n
+          src: 'ai', prio: 1, w: 1, n: c.total, kind: 'ty', value: c.t,
+          label: 'Recurring issue',
+          v: `${c.t} in ${c.inMonths} of ${n} months · ${usd(creditOf(c.t))} credit`,
+          go: 'Investigate pattern'
         });
       }
 
@@ -359,8 +388,10 @@ let queueSearch = '';
       if (topValue) {
         const t = byValue.find((x) => x[0] === topValue);
         out.push({
-          group: 'ai', rank: 2, label: 'High-value impact', n: t[1], kind: 'ty', value: t[0],
-          v1: usd(t[2]), v2: `${t[0]} · ${pct(t[2], S.credit)} of credit`
+          src: 'ai', prio: 2, w: 4, n: t[1], kind: 'ty', value: t[0],
+          label: 'High-value impact',
+          v: `${t[0]} · ${usd(t[2])} · ${pct(t[2], S.credit)} of credit`,
+          go: 'Investigate pattern'
         });
       }
 
@@ -381,9 +412,10 @@ let queueSearch = '';
       if (topGrower) {
         const g = growers.find((s) => s.t === topGrower);
         out.push({
-          group: 'ai', rank: 3, label: 'Emerging trend', n: g.total, kind: 'ty', value: g.t,
-          v1: usd(creditOf(g.t)), v2: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month`,
-          spark: g.ms, nMonths: n
+          src: 'ai', prio: 3, w: 7, n: g.total, kind: 'ty', value: g.t,
+          label: 'Emerging trend',
+          v: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month · ${usd(creditOf(g.t))} credit`,
+          go: 'Investigate pattern'
         });
       }
 
@@ -400,90 +432,82 @@ let queueSearch = '';
       const topOpen = Object.keys(byOpen).sort((a, b) => byOpen[b] - byOpen[a])[0];
       if (topOpen) {
         out.push({
-          group: 'ai', rank: 4, label: 'Potential CAPA', n: byOpen[topOpen], kind: 'ty', value: topOpen,
-          v1: `${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
-          v2: `${topOpen} is the biggest open pile to write one against`
+          src: 'ai', prio: 2, w: 5, n: byOpen[topOpen], kind: 'ty', value: topOpen,
+          label: 'Potential CAPA',
+          v: `${topOpen} is the biggest open pile · ${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
+          go: 'Start CAPA review'
         });
       }
 
       return out;
     }
 
-    // The volume and value cards, in reading order. Each count is the exact
-    // number the table below shows for the same filter, so the panel and the
-    // table cannot disagree. Total claims has nothing to filter to, so it is
-    // the one card that just jumps to the table.
+    // The metric half of the feed. Each count is the exact number of rows the
+    // card's filter opens, so the feed and the table below cannot disagree.
+    // Weight only matters inside a priority tier, and matches where the same
+    // item used to sit in reading order.
     function buildActions() {
       const q = queue();
       const out = [];
       const add = (o) => { if (o.n > 0) out.push(o); };
 
-      add({
-        group: 'card', rank: 1, sev: 3, n: S.total, kind: null, value: null,
-        label: 'Total claims', v1: usd(S.credit), v2: `${usd(S.avgCredit)} average each`
-      });
-
       const open = qcount(q, 'Unresolved');
       add({
-        group: 'card', rank: 2, sev: 1, n: S.unresolved, kind: 'reason', value: 'Unresolved',
-        label: 'Open claims', v1: cash(qsum(open)), v2: pct(S.unresolved, S.total) + ' of intake'
+        src: 'metric', prio: 1, w: 2, n: S.unresolved, kind: 'reason', value: 'Unresolved',
+        label: 'Open claims',
+        v: `${cash(qsum(open))} exposure · ${pct(S.unresolved, S.total)} of intake`,
+        go: 'Open queue'
       });
 
       add({
-        group: 'card', rank: 3, sev: 3, n: S.resolved, kind: 'reason', value: 'Resolved',
-        label: 'Resolved claims', v1: pct(S.resolved, S.total) + ' closed',
-        v2: S.medianDays ? `${S.medianDays.toFixed(1)} days median` : 'median not measured'
+        src: 'metric', prio: 1, w: 3, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
+        label: 'Awaiting action',
+        v: `${pct(S.unfinished, S.total)} of intake · entry not marked finished`,
+        go: 'Review entries'
       });
 
       add({
-        group: 'card', rank: 4, sev: 1, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
-        label: 'Awaiting action', v1: pct(S.unfinished, S.total) + ' of intake', v2: 'entry not marked finished'
+        src: 'metric', prio: 2, w: 6, n: S.repeatClaims, kind: 'reason', value: 'Repeat-claim order',
+        label: 'Repeat-claim orders',
+        v: `${num(S.repeatOrders)} orders hit twice · ${usd(S.repeatCredit)} credit`,
+        go: 'Review orders'
       });
 
-      add({
-        group: 'card', rank: 5, sev: 2, n: S.repeatClaims, kind: 'reason', value: 'Repeat-claim order',
-        label: 'Repeat-claim orders', v1: `${num(S.repeatOrders)} orders hit twice`, v2: usd(S.repeatCredit) + ' credit'
-      });
-
-      return aiFindings().concat(out).sort((a, b) => a.rank - b.rank);
+      return aiFindings().concat(out).sort((a, b) => a.prio - b.prio || a.w - b.w);
     }
 
+    // Every card is the same six-part shape regardless of origin: priority tag,
+    // source tag, headline number, label, one line of context, one verb. The
+    // flex column plus margin-top:auto on the button keeps every button on the
+    // same baseline in a row, which a fixed structure is what buys you.
     const actCard = (a) => {
       const sel = focus && a.kind && focus.kind === a.kind && focus.value === a.value ? ' sel' : '';
-      const chip = a.group === 'ai' ? 'AI' : SEV[a.sev][0];
-      const cls = a.group === 'ai' ? 'pai' : SEV[a.sev][1];
-      const go = a.kind ? (a.sev === 1 ? 'Open' : 'See') : 'Table';
-      const attrs = a.kind
-        ? `href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false"`
-        : 'href="#open"';
-      return `<a class="card act-card g-${a.group} ${cls}${sel}" ${attrs}>
-          <span class="pc ${cls}">${chip}</span>
+      const [pLabel, pCls] = PRIO[a.prio];
+      const [sLabel, sCls] = SRC[a.src];
+      return `<a class="card ncard ${pCls}${sel}" href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false">
+          <span class="tags"><span class="tag ${pCls}">${pLabel}</span><span class="tag ${sCls}">${sLabel}</span></span>
           <b class="ac-n">${num(a.n)}</b>
           <span class="ac-label">${esc(a.label)}</span>
-          ${a.spark ? spark(a.spark, a.nMonths) : ''}
-          <div class="ac-foot">
-            <span class="ac-money">${a.v1}<em>${esc(a.v2)}</em></span>
-            <span class="go">${go} →</span>
-          </div>
+          <span class="ac-v">${esc(a.v)}</span>
+          <span class="go">${esc(a.go)} →</span>
         </a>`;
     };
 
-    function renderGroup(key, items) {
-      const meta = GROUPS.find((g) => g[0] === key);
-      if (!items.length) return '';
-      return `
-        <div class="agl">
-          <span class="agh ${key}">${meta[1]}</span>
-          <span class="mu" style="font-size:12px">${meta[2]}</span>
-          <div class="sp"></div>
-          <span class="mu" style="font-size:12px">${items.length} card${items.length > 1 ? 's' : ''}</span>
-        </div>
-        <div class="grid g3">${items.map(actCard).join('')}</div>`;
-    }
-
+    // One grid, one sort. The group header that used to split AI cards from
+    // metric cards is gone - it labelled a distinction the feed no longer makes
+    // in the ordering. Its place is taken by a legend for the three priority
+    // tiers, which is the thing a reader now has to decode.
     function renderFindings() {
       const all = buildActions();
-      return GROUPS.map(([key]) => renderGroup(key, all.filter((a) => a.group === key))).join('');
+      if (!all.length) return '<p class="mu">Nothing outstanding this year.</p>';
+      const legend = Object.keys(PRIO)
+        .map((k) => `<span class="tag ${PRIO[k][1]}">${PRIO[k][0]}</span>`).join('');
+      return `
+        <div class="agl">${legend}
+          <div class="sp"></div>
+          <span class="mu" style="font-size:12px">${all.length} card${all.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="grid g3">${all.map(actCard).join('')}</div>`;
     }
 
     // ---------- open claims table ----------
@@ -546,31 +570,29 @@ let queueSearch = '';
       const all = queue();
       const isSearching = searching();
       const filtering = Boolean(focus) || isSearching;
-      const rows = filtering ? all.filter(matches) : all;
       // No fallback to `all` while filtering: a search that matches nothing has
       // to say so, not quietly display the whole queue again.
-      const shown = rows;
+      const shown = filtering ? all.filter(matches) : all;
       const admin = isAdmin();
       const g = queueGrouping();
 
+      // The card title above already states the year's open-claim count, so the
+      // resting state says nothing here. The banner only appears when a search
+      // or a card filter is active, and it carries just the active filter plus
+      // the way out - the "n of m" readout lives once, in the toolbar below.
       const banner = isSearching
         ? `<div class="row" style="margin-bottom:10px">
              <span class="b High">${esc(queueSearch.trim())}</span>
-             <span class="mu">${rows.length} of ${all.length} claim${rows.length === 1 ? '' : 's'} match</span>
              <div class="sp"></div>
              <button class="btn s" onclick="setQueueSearch('')">Clear search</button>
            </div>`
         : focus
         ? `<div class="row" style="margin-bottom:10px">
              <span class="b High">${esc(focus.value)}</span>
-             <span class="mu">${rows.length} of ${all.length}</span>
              <div class="sp"></div>
              <button class="btn s" onclick="clearFocus()">Clear</button>
            </div>`
-        : `<div class="row" style="margin-bottom:10px">
-             <span class="b High">${num(all.length)}</span>
-             <span class="mu">${year} · ${admin ? 'all owners' : 'your caseload'}</span>
-           </div>`;
+        : '';
 
       const colCount = admin ? 9 : 8;
       // One table, one thead, one tbody per group. Separate tables per group
@@ -581,7 +603,7 @@ let queueSearch = '';
       // out and the grouping stops being scoped to this table.
       const head = `<div class="tw" style="border:0;margin-top:10px;border-radius:0">
           <table class="qtable">
-            <thead><tr><th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th>${admin ? '<th>Owner</th>' : ''}<th>Status</th><th>Credit</th><th>Why it is here</th><th>Raised</th></tr></thead>
+            <thead><tr><th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th>${admin ? '<th>Owner</th>' : ''}<th>Status</th><th>Credit</th><th>Root cause</th><th>Raised</th></tr></thead>
           </table>
         </div>`;
 
@@ -598,7 +620,6 @@ let queueSearch = '';
           <td>${esc(r.date).slice(0, 10)}</td>
         </tr>`;
 
-      const hits = isSearching ? rows.length : null;
       const controls = `<div class="qbar">
           <div class="qsearch">
             <input id="qsearch" type="search" placeholder="Search claim no. or order no." value="${esc(queueSearch)}"
@@ -611,7 +632,7 @@ let queueSearch = '';
             ${Object.entries(QUEUE_GROUPS).map(([k, v]) => `<option value="${k}"${queueGroup === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
           </select>
           <div class="sp"></div>
-          <span class="mu">${hits === null ? '' : `${num(hits)} match${hits === 1 ? '' : 'es'} · `}${num(shown.length)} / ${num(all.length)}</span>
+          ${filtering ? `<span class="mu">${num(shown.length)} of ${num(all.length)} shown</span>` : ''}
           <button class="btn s" onclick="expandAllGroups()">Expand all</button>
           <button class="btn s" onclick="collapseAllGroups()">Collapse all</button>
         </div>`;
@@ -688,7 +709,7 @@ let queueSearch = '';
           <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
         </div>
 
-        ${sect('What Needs Your Attention', '', `<span class="b High">${num(openItems)} open</span>`)}
+        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', `<span class="b High">${num(openItems)} open</span>`)}
         ${renderFindings()}
 
         <div class="split"></div>
@@ -715,7 +736,7 @@ let queueSearch = '';
 
         ${sect('Where the Claims Come From')}
         <div class="grid g3">
-          <div class="card">
+          <div class="card dcard">
             ${cardTitle('Claims by team area', '')}
             ${donut('area', S.area)}
           </div>
@@ -775,7 +796,7 @@ let queueSearch = '';
         </div>
 
         <div class="card" id="attention" style="margin-top:24px;scroll-margin-top:80px">
-          ${cardTitle('Open Claims', `${num(openItems)} in ${year}`, `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
+          ${cardTitle('Open Claims', `${num(openItems)} in ${year} · ${admin ? 'all owners' : 'your caseload'}`, `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
           ${renderAttention()}
         </div>`;
     }

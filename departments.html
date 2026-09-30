@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal — Department</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <style>
+    /* Page-local only. Every rule is prefixed, so nothing here can reach the
+       existing dashboards. */
+    .dp-pick{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+    .dp-pick .dropdown{flex:none}
+    .dp-pick select{font-family:inherit}
+    .tag{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:9px;
+      background:color-mix(in srgb,var(--pr) 8%,var(--card));box-shadow:inset 0 0 0 1px rgba(99,102,241,.22);
+      font-size:13px;font-weight:600}
+    .tag .mu{font-weight:500}
+    /* ---- warehouse cards ---- */
+    .whcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-top:12px}
+    .whc{display:flex;flex-direction:column;gap:3px;text-align:left;padding:12px;border-radius:11px;
+      border:1px solid var(--bd);background:var(--card);font-family:inherit;cursor:pointer}
+    .whc:hover{border-color:var(--pr)}
+    .whc[aria-pressed="true"]{border-color:var(--pr);box-shadow:0 0 0 1px var(--pr) inset}
+    .whc.top{background:color-mix(in srgb,var(--pr) 4%,var(--card))}
+    .whc .whr{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--pr-d)}
+    .whc .whk{font-size:21px;line-height:1.05}
+    .whc .whn{font-size:11.5px;color:var(--mu);min-height:2.6em}
+    .whc .whbig{font-size:16px;font-weight:600;margin-top:2px}
+    .whc .whbig em{font-style:normal;font-size:11px;font-weight:400;color:var(--mu);margin-left:4px}
+    .whc .whshare{font-size:11px;color:var(--mu)}
+    .whc .whmeter{display:block;height:5px;border-radius:3px;background:var(--bd2);margin:5px 0 3px;overflow:hidden}
+    .whc .whmeter i{display:block;height:100%;background:linear-gradient(90deg,#6366f1,#8b93f8)}
+    .whc.top .whmeter i{background:linear-gradient(90deg,var(--pr),#8b93f8)}
+    .whc .whex{font-size:11px;color:var(--mu)}
+    .whc .whex b{color:var(--tx);font-weight:600}
+    .hb.whb{cursor:default}
+
+    /* Year-on-year column chart. */
+    .yc{display:flex;align-items:flex-end;gap:4px;height:190px;padding-top:24px}
+    .yc .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+      gap:4px;min-width:0;height:100%}
+    .yc .col em{font-style:normal;font-size:10.5px;font-weight:600;color:var(--tx);
+      font-variant-numeric:tabular-nums;white-space:nowrap}
+    .yc .col span{display:block;width:100%;max-width:34px;background:linear-gradient(180deg,#8b93f8,var(--pr));
+      border-radius:5px 5px 0 0;min-height:2px}
+    .yc .col.now span{background:linear-gradient(180deg,#7c6cf0,#4f46e5)}
+    .yc .col.peak span{background:linear-gradient(180deg,#f2c778,#e8a13a)}
+    .yc .col label{font-size:9.5px;color:var(--mu);white-space:nowrap;transform:rotate(-45deg);
+      transform-origin:center;margin-top:14px}
+    .yaxis{display:flex;justify-content:space-between;font-size:10px;color:var(--mu);margin-top:6px;
+      border-top:1px dashed var(--bd);padding-top:5px}
+
+    /* Rate rows with a scope marker on the bar. */
+    .rr{display:grid;grid-template-columns:170px 1fr 62px 96px;gap:10px;align-items:center;
+      font-size:12px;margin:9px 0;padding:4px 6px;border-radius:8px}
+    .rr:hover{background:color-mix(in srgb,var(--pl) 55%,transparent)}
+    .rr .trk{height:12px;border-radius:6px;background:var(--bd);overflow:visible;position:relative}
+    .rr .trk i{position:absolute;left:0;top:0;height:12px;border-radius:6px;display:block;
+      background:linear-gradient(90deg,var(--pr),#8b93f8)}
+    .rr .trk.bad i{background:linear-gradient(90deg,#d9534f,#f0a09a)}
+    .rr .trk u{position:absolute;top:-3px;width:2px;height:18px;background:var(--mu);opacity:.6;
+      border-radius:1px}
+    .rr b{text-align:right;font-variant-numeric:tabular-nums}
+    .rr .cmp{font-size:11px;text-align:right;color:var(--mu)}
+
+    .note{border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.5;
+      background:#fdf0da;color:#7a5307;box-shadow:inset 0 0 0 1px rgba(232,161,58,.35)}
+    .note b{font-weight:700}
+    .note code{font-family:inherit;font-weight:700}
+  </style>
+  <script>
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    let year = LATEST_YEAR;
+    let dept = 'all';
+    let whFocus = null;       // a warehouse the reader has clicked, to measure against
+    let yoyMetric = 'claims'; // the year-on-year chart plots claims or credit
+    let qGroup = 'reason';
+    let qSearch = '';
+
+    const pnum = (a, b) => (b ? (a / b) * 100 : 0);
+    const usdK = (n) => (n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'K' : '$' + Math.round(n));
+
+    function block(key, y) {
+      const bucket = SCOPED_STATS[y];
+      if (bucket && bucket[key]) return bucket[key];
+      return zeroBlock('No ' + y + ' claims');
+    }
+
+    function zeroBlock(label) {
+      return {
+        range: label, scope: '', scopeWh: '', scopeDept: '', total: 0, credit: 0,
+        avgCredit: 0, credited: 0, creditIssued: 0, memos: 0, maxClaim: 0,
+        resolved: 0, open: 0, cancelled: 0, denied: 0, unresolved: 0, unfinished: 0,
+        noRca: 0, rcaFilled: 0, capaFilled: 0, paFilled: 0, unassigned: 0,
+        repeatOrders: 0, repeatClaims: 0, repeatCredit: 0, medianDays: 0, p90Days: 0,
+        sameDayPct: 0, resolvedTimed: 0, raisers: 0, orders: 0, orderClaims: 0,
+        multiOrders: 0, claimsPerOrder: 0, repeatRate: 0, noCredit: 0, sampleClaims: 0,
+        status: [], area: [], whs: [], dist: [], types: [], typeMonths: [], dept: [], months: []
+      };
+    }
+
+    // DEPT_INDEX is [key, label, claimCount, routedOwner]. The fallback is for a
+    // department that is somehow neither in the index nor routed to anyone.
+    const row = (d) => DEPT_INDEX.find((x) => x[0] === d) || [d, d, 0, 'MP'];
+
+    // A manager is only offered the departments routed to them.
+    const myDepts = () => (isAdmin() ? DEPT_INDEX : DEPT_INDEX.filter((d) => canSee(d[3])));
+
+    const WH_NAME = (W) => {
+      const r = WAREHOUSES.find((w) => w[0] === W);
+      return r ? r[1] : 'Unknown site';
+    };
+
+    // Months with data in the selected year. Taken from the company block, never
+    // from the department: a department with no claims in September would
+    // otherwise be judged on eight months against everyone else's nine.
+    function monthsSoFar(y) {
+      const m = block('all', y).months;
+      let n = 0;
+      m.forEach((row, i) => { if (row[0] > 0) n = i + 1; });
+      return n || 12;
+    }
+
+    function upTo(b, n) {
+      let c = 0, v = 0;
+      for (let i = 0; i < n; i++) { c += b.months[i] ? b.months[i][0] : 0; v += b.months[i] ? b.months[i][1] : 0; }
+      return { c, v };
+    }
+
+    function sect(title, note, right) {
+      return `<div class="row sec"><div><h2>${title}</h2>${note ? `<span class="mu">${note}</span>` : ''}</div><div class="sp"></div>${right || ''}</div>`;
+    }
+    function cardTitle(t, note, right) {
+      return `<div class="row cht"><h3>${t}</h3>${note ? `<span class="mu cht-n">${note}</span>` : ''}<div class="sp"></div>${right || ''}</div>`;
+    }
+    function ddMenu(btn) {
+      const dd = btn.closest('.dropdown');
+      const open = !dd.classList.contains('open');
+      document.querySelectorAll('.dropdown.open').forEach((o) => {
+        o.classList.remove('open');
+        o.querySelector('button')?.setAttribute('aria-expanded', 'false');
+      });
+      dd.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', String(open));
+      return false;
+    }
+
+    function setDept(d) { dept = d; whFocus = null; render(); }
+    function setWh(w) { whFocus = whFocus === w ? null : w; render(); }
+    function setYear(y) { year = SCOPED_STATS[y] ? y : LATEST_YEAR; whFocus = null; render(); }
+    function setYoy(m) { yoyMetric = m; render(); }
+
+    // ---------- charts ----------
+    function hbar(data, valueIdx) {
+      const i = valueIdx === undefined ? 1 : valueIdx;
+      const top = Math.max(...data.map((d) => d[i]), 1);
+      const f = (v) => (i === 2 ? usd(v) : num(v));
+      return data.map((d) =>
+        `<div class="hb${i === 2 ? ' wide' : ''}" title="${esc(d[0])}"><div>${esc(d[0])}</div>` +
+        `<div class="trk"><span style="width:${pnum(d[i], top).toFixed(1)}%"></span></div>` +
+        `<b>${f(d[i])}</b></div>`).join('');
+    }
+
+    function vbar(data, heightIdx, valueIdx, f) {
+      const max = Math.max(...data.map((d) => d[heightIdx]), 1);
+      return `<div class="vb">` + data.map((d) => {
+        const v = d[heightIdx];
+        return `<div><em>${f(d[valueIdx])}</em><span style="height:${Math.max(3, pnum(v, max)).toFixed(1)}px"></span><label>${esc(d[0])}</label></div>`;
+      }).join('') + `</div>`;
+    }
+
+    function niceScale(raw, steps) {
+      const s = steps || 4;
+      const rough = Math.max(raw, 1) / s;
+      const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+      const norm = rough / mag;
+      const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+      return { step, top: step * s };
+    }
+
+    function spark(ms, n) {
+      const vals = ms.slice(0, n);
+      if (vals.length < 2) return '';
+      const max = Math.max(...vals, 1);
+      const x = (i) => (i * (100 / (vals.length - 1))).toFixed(1);
+      const y = (v) => (30 - 4 - (v / max) * 21).toFixed(1);
+      const pts = vals.map((v, i) => `${x(i)},${y(v)}`).join(' ');
+      const dots = vals.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="1.7"/>`).join('');
+      return `<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/>${dots}</svg>`;
+    }
+
+    // Year on year, every year cut to the same number of months. 2026 is a part
+    // year, so plotting its nine months next to twelve full years would draw a
+    // collapse that never happened.
+    function yearChart() {
+      const n = monthsSoFar(year);
+      const i = yoyMetric === 'credit' ? 1 : 0;
+      const f = yoyMetric === 'credit' ? usdK : num;
+      const series = YEARS.map((y) => {
+        const t = upTo(block(scopeKeyFor(y), y), n);
+        return { y, v: i ? t.v : t.c };
+      });
+      const max = Math.max(...series.map((s) => s.v), 1);
+      const { top } = niceScale(max);
+      const peak = series.reduce((a, b) => (b.v > a.v ? b : a), series[0]);
+      return `<div class="yc">` + series.map((s) => {
+        const cls = s.y === String(year) ? ' now' : s.y === peak.y ? ' peak' : '';
+        return `<div class="col${cls}" title="${s.y}: ${f(s.v)} in ${MONTHS[0]}-${MONTHS[n - 1]}">
+          <em>${s.v ? f(s.v) : ''}</em>
+          <span style="height:${Math.max(0.4, pnum(s.v, top)).toFixed(1)}%"></span>
+          <label>${String(s.y).slice(2)}</label>
+        </div>`;
+      }).join('') + `</div>`;
+    }
+
+    const scopeKeyFor = (y) => (dept === 'all' ? 'all' : 'dept:' + dept);
+
+    // ---------- which warehouse had the most defects ----------
+    // A warehouse is where the product was sitting when the fault was found, so
+    // this is the question the department page is really being asked: not "how
+    // many claims" but "which site is producing them". Ranked by rate, because a
+    // big warehouse is always going to raise more claims in absolute terms and
+    // that says nothing about whether it is worse than a small one.
+    //
+    // A warehouse block holds only its own claims, so "defect rate" can be
+    // measured against it, but the export carries no throughput (units stored,
+    // orders shipped) - so this is a share of all claims, not a true defect
+    // rate. Labelled as such rather than dressed up as a percentage of goods.
+    function whRank(y) {
+      const rows = WAREHOUSES.map(([w, name]) => {
+        const b = SCOPED_STATS[y] && SCOPED_STATS[y]['wh:' + w];
+        return { w, name, b, n: b ? b.total : 0, credit: b ? b.credit : 0 };
+      });
+      const all = block('all', y);
+      rows.forEach((r) => { r.share = all.total ? pnum(r.n, all.total) : 0; });
+      return { rows: rows.sort((a, b) => b.n - a.n), all };
+    }
+
+    // What the selected department raised at each warehouse, so the ranking can
+    // be read as "where this department's defects sit" as well as overall.
+    function whForDept(y) {
+      const S = block('dept:' + dept, y);
+      const mine = new Map((S.whs || []).map(([w, n, c]) => [w, { n, c }]));
+      return whRank(y).rows.map((r) => Object.assign(r, { dn: (mine.get(r.w) || {}).n || 0 }));
+    }
+
+    function whCards() {
+      const { rows, all } = whRank(year);
+      const top = rows[0];
+      const n = monthsSoFar(year);
+      return `<div class="whcards">` + rows.map((r, i) => {
+        const wBlock = block('wh:' + r.w, year);
+        const worst = (wBlock.types || []).filter((t) => t[0] !== '(Unclassified)')[0];
+        // Open share is the warehouse's own health: claims still sitting there.
+        const openPct = r.n ? pnum(wBlock.unresolved, r.n) : 0;
+        return `<button class="whc${i === 0 ? ' top' : ''}" onclick="setWh('${r.w}')" aria-pressed="${whFocus === r.w}">
+          <span class="whr">${i === 0 ? 'Most defects' : 'Rank ' + (i + 1)}</span>
+          <b class="whk">${r.w}</b>
+          <span class="whn">${esc(r.name)}</span>
+          <span class="whbig">${num(r.n)}<em>claims</em></span>
+          <span class="whshare">${r.share.toFixed(1)}% of all ${year} claims</span>
+          <span class="whmeter"><i style="width:${pnum(r.n, top.n || 1).toFixed(1)}%"></i></span>
+          <span class="whex">${worst ? `Top fault <b>${esc(worst[0])}</b> · ${usd(worst[2])}` : 'No typed claims'}</span>
+          <span class="whex">${r.n ? `${openPct.toFixed(1)}% still open` : 'No claims'}</span>
+        </button>`;
+      }).join('') + `</div>
+        <p class="mu" style="margin-top:12px">Warehouses are mock A–F values from the export's
+        <code>Warehouse</code> column, not a real site feed, and the export has no unit counts -
+        so these are shares of all claims, not defect rates against goods handled.</p>`;
+    }
+
+    // The department's own warehouse split, with the clicked site highlighted.
+    function whSplit() {
+      const rows = whForDept(year);
+      const mine = rows.filter((r) => r.dn);
+      if (!mine.length) return `<p class="mu">Nothing in ${esc(dept === 'all' ? 'this year' : dept)} came from a warehouse this year.</p>`;
+      const top = mine[0].dn;
+      return hbar(mine.map((r) => [`${r.w} · ${r.name}`, r.dn]), 1).replace(/class="hb"/g, 'class="hb whb"') +
+        `<p class="mu" style="margin-top:10px">Where this department's ${year} claims came from.
+        ${whFocus ? `${esc(WH_NAME(whFocus))} holds ${num(mine.find((r) => r.w === whFocus)?.dn || 0)} of them.` : ''}</p>`;
+    }
+
+    // ---------- what to improve ----------
+    // A rate is what a count cannot show, because counts grow with volume. Each
+    // row is this department's rate, the mark is the peer group's rate, and the
+    // bar turns red when the department is worse than the group it is measured
+    // against. "Worse" is stated per row, because a high open rate is bad and a
+    // high closed-for-no-cost rate is good.
+    const IMPROVE = [
+      { k: 'Claims still open', v: (b) => pnum(b.unresolved, b.total), f: (n) => n.toFixed(1) + '%', good: 'low' },
+      { k: 'Entry never finished', v: (b) => pnum(b.unfinished, b.total), f: (n) => n.toFixed(1) + '%', good: 'low' },
+      { k: 'Orders that came back twice', v: (b) => b.repeatRate, f: (n) => n.toFixed(1) + '%', good: 'low' },
+      { k: 'Claims with no type', v: (b) => pnum(b.unassigned, b.total), f: (n) => n.toFixed(1) + '%', good: 'low' },
+      { k: 'Median days to close', v: (b) => b.medianDays, f: (n) => n.toFixed(2) + 'd', good: 'low' },
+      { k: 'Claims per order', v: (b) => b.claimsPerOrder, f: (n) => n.toFixed(2), good: 'low' },
+      { k: 'Claims with no root cause', v: (b) => pnum(b.noRca, b.total), f: (n) => n.toFixed(1) + '%', good: 'low' },
+      { k: 'Closed for no cost', v: (b) => pnum(b.noCredit, b.total), f: (n) => n.toFixed(1) + '%', good: 'high' }
+    ];
+
+    function improveRows(S, REF, refLabel) {
+      return IMPROVE.map((r) => {
+        const mine = r.v(S), ref = r.v(REF);
+        const diff = ref ? ((mine - ref) / ref) * 100 : null;
+        const worse = diff === null ? null : r.good === 'low' ? diff > 0 : diff < 0;
+        // One shared scale per row so the bar and the marker are comparable.
+        const top = Math.max(mine, ref, 0.0001) * 1.15;
+        return `<div class="rr" title="${esc(r.k)}: ${r.f(mine)} against ${r.f(ref)} for ${esc(refLabel)}">
+          <div>${r.k}</div>
+          <div class="trk${worse ? ' bad' : ''}">
+            <i style="width:${Math.max(0.5, pnum(mine, top)).toFixed(1)}%"></i>
+            <u style="left:${Math.min(99, pnum(ref, top)).toFixed(1)}%" title="${esc(refLabel)}: ${r.f(ref)}"></u>
+          </div>
+          <b>${r.f(mine)}</b>
+          <div class="cmp">${diff === null ? '–' : (worse ? '<span class="up">' : '<span class="dn">') +
+            (diff > 0 ? '+' : diff < 0 ? '−' : '±') + Math.abs(diff).toFixed(0) + '%</span>'}</div>
+        </div>`;
+      }).join('');
+    }
+
+    // ---------- is it a recurring issue ----------
+    // Four patterns read off the department's own monthly claim-type series, so
+    // a standing fault can be told apart from a one-off spike. Each card takes a
+    // different claim type, otherwise all four describe the same dominant type.
+    function insights(S, n) {
+      const out = [];
+      // Nothing was raised, so there is no pattern to find. Saying "0 of 0 carry
+      // a corrective action" about an empty year reads as a finding.
+      if (!S.total) return out;
+      const series = (S.typeMonths || []).map(([t, ms]) => ({
+        t, ms, inMonths: ms.slice(0, n).filter((v) => v > 0).length,
+        total: ms.slice(0, n).reduce((a, b) => a + b, 0)
+      }));
+      const creditOf = (t) => (S.types.find((x) => x[0] === t) || [, 0, 0])[2];
+      const byValue = S.types.filter((t) => t[0] !== '(Unclassified)' && t[2] > 0).slice().sort((a, b) => b[2] - a[2]);
+      const real = series.filter((s) => s.t !== '(Unclassified)');
+      const used = new Set();
+      const claim = (cands) => { const p = cands.find((t) => !used.has(t)); if (p) used.add(p); return p; };
+
+      // 1. A type in every single month is a standing fault, not an incident.
+      const chronic = real.filter((s) => s.inMonths === n && n >= 3 && s.total > 0);
+      const topChronic = claim(chronic.map((s) => s.t));
+      if (topChronic) {
+        const c = chronic.find((s) => s.t === topChronic);
+        out.push({ rank: 1, cls: 'pai', chip: 'AI', label: 'Recurring issue', n: c.total,
+          v1: usd(creditOf(c.t)), v2: `${c.t} in ${c.inMonths} of ${n} months`, spark: c.ms, nMonths: n });
+      }
+
+      // 2. Ranked on credit, not on count - that is what makes it "high value".
+      const topValue = claim(byValue.map((t) => t[0]));
+      if (topValue) {
+        const t = byValue.find((x) => x[0] === topValue);
+        out.push({ rank: 2, cls: 'p2', chip: 'Do next', label: 'High-value impact', n: t[1],
+          v1: usd(t[2]), v2: `${t[0]} · ${pct(t[2], S.credit)} of credit` });
+      }
+
+      // 3. The tail running well above the head. The floors stop a 3 -> 9 a
+      //    month wobble on 20 claims from being dressed up as a trend.
+      const growers = real
+        .filter((s) => n >= 6 && s.total >= 40)
+        .map((s) => {
+          const ms = s.ms.slice(0, n);
+          const head = ms.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+          const tail = ms.slice(-3).reduce((a, b) => a + b, 0) / 3;
+          return { ...s, head, tail, ratio: head ? tail / head : tail ? 9 : 0 };
+        })
+        .filter((s) => s.ratio >= 1.5 && s.tail >= 4)
+        .sort((a, b) => b.ratio - a.ratio);
+      const topGrower = claim(growers.map((s) => s.t));
+      if (topGrower) {
+        const g = growers.find((s) => s.t === topGrower);
+        out.push({ rank: 3, cls: 'p2', chip: 'Do next', label: 'Emerging trend', n: g.total,
+          v1: usd(creditOf(g.t)), v2: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month`, spark: g.ms, nMonths: n });
+      }
+
+      // 4. Where a corrective action is most obviously owed. Read it as a prompt
+      //    to act: across the whole export almost nothing carries one.
+      const byOpen = {};
+      deptOpen().forEach((r) => { byOpen[r.ty || '(Unclassified)'] = (byOpen[r.ty || '(Unclassified)'] || 0) + 1; });
+      const topOpen = Object.keys(byOpen).sort((a, b) => byOpen[b] - byOpen[a])[0];
+      if (topOpen) {
+        out.push({ rank: 4, cls: 'p1', chip: 'Do first', label: 'Potential CAPA', n: byOpen[topOpen],
+          v1: `${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
+          v2: `${topOpen} is the biggest open pile to write one against` });
+      }
+      return out.sort((a, b) => a.rank - b.rank);
+    }
+
+    // The most recent year this department raised anything, so an empty year can
+    // say where the work went instead of just showing zeroes.
+    function lastActivity(d) {
+      const ys = YEARS.filter((y) => block('dept:' + d, y).total > 0);
+      if (!ys.length) return '';
+      const y = ys[ys.length - 1];
+      return `${y} — ${num(block('dept:' + d, y).total)} claims`;
+    }
+
+    // Filtered on the SELECTED department, never on the block's own scopeDept.
+    // A department with no claims in the year gets a zeroed block whose scope
+    // fields are empty, and reading those would fall through to the company
+    // queue - printing 700 unrelated claims under a department that raised none.
+    function deptOpen() {
+      const q = scopedQueue().filter((r) => String(r.date || '').slice(0, 4) === String(year));
+      if (dept === 'all') return q;
+      return q.filter((r) => r.de === dept);
+    }
+
+    // ---------- the department league table ----------
+    // ---------- open claims ----------
+    const Q_GROUPS = {
+      reason: { label: 'Flag', key: (r) => r.reasons, max: 12 },
+      ty: { label: 'Claim type', key: (r) => [r.ty], max: 12 },
+      ar: { label: 'Team area', key: (r) => [r.ar], max: 8 },
+      st: { label: 'Status', key: (r) => [r.st], max: 8 }
+    };
+    const searchTerm = () => String(qSearch == null ? '' : qSearch).trim().toLowerCase();
+    const statusBadge = (s) => `<span class="b ${{ Resolved: 'Low', Open: 'Open', Cancelled: 'Rejected', Denied: 'Rejected' }[s] || 'Open'}">${s}</span>`;
+
+    function renderQueue() {
+      const all = deptOpen();
+      const term = searchTerm();
+      const rows = all.filter((r) => !term ||
+        String(r.id).toLowerCase().includes(term) || String(r.o || '').toLowerCase().includes(term));
+      const g = Q_GROUPS[qGroup] || Q_GROUPS.reason;
+      const admin = isAdmin();
+      const cols = admin ? 9 : 8;
+      const who = dept === 'all' ? 'all departments' : dept;
+
+      const head = `<div class="tw" style="border:0;margin-top:10px;border-radius:0"><table class="qtable"><thead><tr>` +
+        `<th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th>${admin ? '<th>Owner</th>' : ''}` +
+        `<th>Status</th><th>Credit</th><th>Why it is here</th><th>Raised</th></tr></thead></table></div>`;
+
+      const rowHtml = (r) => `<tr>
+        <td><b>#${esc(r.id)}</b></td><td>${esc(r.o)}</td><td>${esc(r.ty)}</td><td>${esc(r.de)}</td>
+        ${admin ? `<td>${esc(ownerName(r.own))}</td>` : ''}
+        <td>${statusBadge(r.st)}</td>
+        <td>${r.am ? money(r.am) : '<span class="mu">—</span>'}</td>
+        <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
+        <td>${esc(r.date).slice(0, 10)}</td></tr>`;
+
+      const controls = `<div class="qbar">
+        <div class="qsearch">
+          <input id="qsearch" type="search" placeholder="Search claim no. or order no." value="${esc(qSearch)}"
+            autocomplete="off" spellcheck="false" aria-label="Search by claim number or order number"
+            oninput="setQueueSearch(this.value)">
+          ${term ? `<button class="qclear" type="button" onclick="setQueueSearch('')" aria-label="Clear search">×</button>` : ''}
+        </div>
+        <span class="mu">Group by</span>
+        <select onchange="qGroup=this.value;openGroups.clear();render()">
+          ${Object.entries(Q_GROUPS).map(([k, v]) => `<option value="${k}"${qGroup === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
+        </select>
+        <div class="sp"></div>
+        <span class="mu">${num(rows.length)} / ${num(all.length)}</span>
+        <button class="btn s" onclick="expandAllGroups()">Expand all</button>
+        <button class="btn s" onclick="collapseAllGroups()">Collapse all</button>
+      </div>`;
+
+      const banner = `<div class="row" style="margin-bottom:10px">
+        <span class="b High">${num(all.length)}</span>
+        <span class="mu">open claims in ${esc(who)} · ${year}${term ? ` · ${num(rows.length)} match "${esc(qSearch.trim())}"` : ''}</span>
+        <div class="sp"></div>
+        ${term ? `<button class="btn s" onclick="setQueueSearch('')">Clear search</button>` : ''}
+      </div>`;
+
+      const body = groupedTable(rows, {
+        cols, key: g.key, max: g.max, rowSort: (a, b) => String(b.date).localeCompare(String(a.date)),
+        rowHtml, empty: `No open claims in ${who} for ${year}.`
+      });
+      return banner + controls + head.replace('</table>', body + '</table>');
+    }
+
+    function setQueueSearch(v) {
+      qSearch = v == null ? '' : String(v);
+      render();
+      const el = document.getElementById('qsearch');
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    }
+
+    // ---------- render ----------
+    function render() {
+      const key = scopeKeyFor(year);
+      const S = block(key, year);
+      const BASE = block('all', year);
+      const n = monthsSoFar(year);
+      const admin = isAdmin();
+      const d = row(dept);
+      // A department draws from several warehouses, so it has no single peer
+      // group the way it had a single location. The peer is the whole company,
+      // or the one warehouse the reader has clicked to drill into.
+      const REF = whFocus ? block('wh:' + whFocus, year) : BASE;
+      const refLabel = whFocus ? WH_NAME(whFocus) : 'the whole company';
+      const cards = insights(S, n);
+
+      // A flat list of departments. The export's own nine columns are all "0", so
+      // these are the nine the portal reports on, in the order it reports them.
+      const options = myDepts().map((x) =>
+        `<option value="${esc(x[0])}"${dept === x[0] ? ' selected' : ''}>${esc(x[0])}${x[2] ? '' : ' (no claims)'}</option>`).join('');
+
+      const peerRows = DEPT_INDEX
+        .map((x) => ({ d: x, b: block('dept:' + x[0], year) }))
+        .filter((r) => r.b.total > 0)
+        .sort((a, b2) => b2.b.total - a.b.total);
+      const peerMax = Math.max(...peerRows.map((r) => r.b.total), 1);
+
+      document.getElementById('app').innerHTML = `
+        <div class="row" style="margin-bottom:6px">
+          <div>
+            <h1>${dept === 'all' ? 'Departments' : esc(dept)}</h1>
+            <span class="mu">${esc(S.range)} · ${num(S.total)} claims · ${usd(S.credit)}${d[3] ? ' · ' + esc(ownerName(d[3])) : ''}</span>
+          </div>
+          <div class="sp"></div>
+          <span class="b Med">Warehouses are mock A–F values</span>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div class="row cht"><h3>Choose a department</h3>
+            <span class="mu cht-n">Every figure on this page re-reads from the department you pick</span></div>
+          <div class="dp-pick">
+            <label class="mu" for="dpt">Department</label>
+            <select id="dpt" style="min-width:250px" onchange="setDept(this.value)">
+              <option value="all"${dept === 'all' ? ' selected' : ''}>All departments</option>
+              ${options}
+            </select>
+            <div class="dropdown">
+              <button class="dd-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" onclick="return ddMenu(this)">
+                ${year}<span class="dd-caret">▾</span></button>
+              <div class="dd-menu year-menu" role="listbox" aria-label="Reporting year">
+                ${YEARS.map((y) => `<button type="button" role="option" aria-selected="${year === y}" class="${year === y ? 'on' : ''}"
+                  onclick="setYear(${y})">${y}${y === year ? '<span class="mu">current</span>' : ''}</button>`).join('')}
+              </div>
+            </div>
+            <div class="sp"></div>
+            <span class="tag">${esc(dept === 'all' ? 'All departments' : d[1])}
+              ${dept === 'all' ? `<span class="mu">${num(DEPT_INDEX.length)} departments</span>` : ''}</span>
+          </div>
+          ${admin ? '' : `<div class="note" style="margin-top:12px"><b>Manager view.</b> Only the departments routed to you are listed. Every figure below is your own caseload.</div>`}
+        </div>
+
+        ${sect('Which warehouse had the most defects?', 'Where the product was sitting when the fault was found')}
+        <div class="card">
+          ${cardTitle(`Warehouse ranking for ${year}`, 'Ranked by claims raised · click a site to compare against it')}
+          ${whCards()}
+        </div>
+
+        <div class="split"></div>
+
+        ${sect("Where this department's claims came from", esc(dept === 'all' ? 'Every department' : dept) + ' · ' + year)}
+        <div class="grid g2">
+          <div class="card">
+            ${cardTitle('Claims by warehouse', 'The sites behind this department')}
+            ${whSplit()}
+          </div>
+          <div class="card">
+            ${cardTitle('Share of all claims', `Warehouse against the ${year} total`)}
+            ${hbar(whRank(year).rows.map((r) => [`${r.w} · ${r.name}`, r.share]), 1)}
+            <p class="mu" style="margin-top:10px">A share, not a defect rate: the export has no units
+            stored or orders shipped per site.</p>
+          </div>
+        </div>
+
+        ${sect('Year by year', `Every year cut to the same ${MONTHS[0]}–${MONTHS[n - 1]} months, so a part year cannot look like a collapse`)}
+        <div class="card">
+          ${cardTitle(dept === 'all' ? 'Claims raised per year' : esc(dept) + ' claims per year', '',
+            `<div class="seg" role="group">
+              <button type="button" class="${yoyMetric === 'claims' ? 'on' : ''}" onclick="setYoy('claims')">Claims</button>
+              <button type="button" class="${yoyMetric === 'credit' ? 'on' : ''}" onclick="setYoy('credit')">Credit</button>
+            </div>`)}
+          ${yearChart()}
+          <div class="legend row">
+            <span><i style="background:#4f46e5"></i> ${year} (selected)</span>
+            <span><i style="background:#e8a13a"></i> Best year</span>
+            <span><i style="background:#8b93f8"></i> Other years</span>
+            <span>${yoyMetric === 'credit' ? 'Credit' : 'Claims'} in ${MONTHS[0]}–${MONTHS[n - 1]} of each year</span>
+          </div>
+        </div>
+
+        <div class="split"></div>
+
+        ${sect('Is it a recurring issue?', 'Read off the department\'s own monthly claim-type series')}
+        <div class="grid g3">
+          ${cards.length ? cards.map((c) => `
+            <div class="card act-card ${c.cls}">
+              <span class="pc ${c.cls}">${c.chip}</span>
+              <b class="ac-n">${num(c.n)}</b>
+              <span class="ac-label">${esc(c.label)}</span>
+              ${c.spark ? spark(c.spark, c.nMonths) : ''}
+              <div class="ac-foot"><span class="ac-money">${c.v1}<em>${esc(c.v2)}</em></span></div>
+            </div>`).join('') : `<div class="card"><p class="mu">${S.total
+              ? `Nothing met the threshold in ${esc(dept === 'all' ? 'this year' : dept)} — the volume is too small to call a pattern.`
+              : `No claims were raised by ${esc(dept)} in ${year}. Its last activity is ${
+                  lastActivity(dept) || 'not in this export'}.`}</p></div>`}
+        </div>
+
+        ${sect('What should be improved', `Each rate against ${esc(refLabel)}`)}
+        <div class="card">
+          ${cardTitle(dept === 'all' ? 'Company rates' : esc(dept) + ' rates', 'Grey tick is the peer group')}
+          ${improveRows(S, REF, refLabel)}
+          <div class="row" style="margin-top:10px">
+            <span class="mu" style="font-size:12px">Red = worse than ${esc(refLabel)} · a count alone cannot show this, because counts grow with volume</span>
+          </div>
+        </div>
+
+        ${sect('Where this department sits', `Against the other ${peerRows.length - 1} department${peerRows.length - 1 === 1 ? '' : 's'} in ${year}`)}
+        <div class="card">
+          ${cardTitle('All departments side by side', 'The selected one is highlighted')}
+          ${peerRows.length ? peerRows.map(({ d: p, b }) => {
+            const mine = canSee(p[3]);
+            return mine
+              ? `<button type="button" class="rr" style="width:100%;border:1px solid ${dept === p[0] ? 'var(--pr)' : 'var(--bd)'};
+                background:${dept === p[0] ? 'color-mix(in srgb,var(--pr) 5%,var(--card))' : 'var(--card)'};cursor:pointer;font-family:inherit"
+                onclick="setDept('${esc(p[0])}')" title="Scope the page to ${esc(p[0])}">
+                <div style="text-align:left">${esc(p[1])}</div>
+                <div class="trk"><i style="width:${pnum(b.total, peerMax).toFixed(1)}%"></i></div>
+                <b>${num(b.total)}</b>
+                <div class="cmp">${pct(b.unresolved, b.total)} open</div>
+              </button>`
+              : `<div class="rr" style="width:100%;border:1px solid var(--bd);background:var(--card)">
+                <div style="text-align:left">${esc(p[1])}<span class="mu"> · not yours</span></div>
+                <div class="trk"><i style="width:${pnum(b.total, peerMax).toFixed(1)}%"></i></div>
+                <b>${num(b.total)}</b>
+                <div class="cmp">${pct(b.unresolved, b.total)} open</div>
+              </div>`;
+          }).join('') : '<p class="mu">No other department raised claims here in ' + year + '.</p>'}
+        </div>
+
+        <div class="card" id="open" style="margin-top:24px;scroll-margin-top:80px">
+          ${cardTitle('Open claims', dept === 'all' ? `All departments in ${year}` : esc(dept), `<a class="btn s" href="dashboard.html">Claims dashboard</a>`)}
+          ${renderQueue()}
+        </div>`;
+    }
+
+    function main() {
+      if (!requireAuth()) return;
+      document.body.innerHTML = layout('dept');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

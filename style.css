@@ -61,7 +61,6 @@ h1{font-size:22px;margin:0;letter-spacing:-.01em}h2{font-size:17px;margin:0;lett
 .pc{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
 .pc.p1{background:#fdebe9;color:#c4453a}
 .pc.p2{background:#fdf0da;color:#b9770e}
-.pc.p3{background:#e7eefb;color:#2b6ca8}
 .pc.p4{background:color-mix(in srgb,var(--bd) 60%,transparent);color:var(--mu)}
 .kpi .pc{position:absolute;top:12px;right:12px;margin:0}
 .sec{margin:26px 0 12px;align-items:flex-end}
@@ -265,26 +264,10 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 @media(max-width:820px){.login .rolegrid{grid-template-columns:1fr}}
 .err{color:var(--er);font-size:12px;margin-bottom:10px;background:#fdebe9;border:1px solid #f5c9c5;padding:8px 12px;border-radius:10px}.mu{color:var(--mu)}
 
-/* ---- dashboard: merged finding + action cards ---- */
-.agl{display:flex;align-items:center;gap:10px;margin:18px 0 10px}
-.agl:first-of-type{margin-top:4px}
-.agh{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:5px 12px;border-radius:8px;white-space:nowrap}
-.agh.ai{color:#5b46c4;background:#efeaff;box-shadow:inset 0 0 0 1px rgba(91,70,196,.22)}
-.agh.card{color:var(--mu);background:color-mix(in srgb,var(--mu) 12%,transparent);box-shadow:inset 0 0 0 1px var(--bd)}
-.split{margin:30px 0 4px;border:0;border-top:1px solid var(--bd)}
-.act-card{display:block;text-decoration:none;color:inherit;cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s;border-left:4px solid var(--bd)}
-.act-card:hover{transform:translateY(-2px);box-shadow:0 1px 2px rgba(16,24,40,.04),0 18px 34px -20px rgba(16,24,40,.28)}
-.act-card.p1{border-left-color:var(--er)}
-.act-card.p2{border-left-color:var(--wn)}
-.act-card.p3{border-left-color:var(--bd2)}
-.act-card.pai{border-left-color:#7c6cf0}
-.act-card.sel{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
-.act-card.g-card{background:color-mix(in srgb,var(--mu) 5%,var(--card));border-left-style:dashed}
-.act-card.g-card:hover{background:color-mix(in srgb,var(--mu) 8%,var(--card))}
-.act-card.g-card.p1{border-left-color:var(--er);border-left-style:solid}
-.act-card.g-card.p2{border-left-color:var(--wn);border-left-style:solid}
-.act-card.g-ai{background:linear-gradient(160deg,color-mix(in srgb,#7c6cf0 7%,var(--card)),var(--card) 58%)}
-.act-card .pc{margin-bottom:10px}
+/* ---- shared finding-card content, also used by departments.html ---- */
+/* departments.html renders this same card shape (its own four insights), so
+   these rules stay generic. The chrome around them is per-page: .act-card there,
+   .ncard on the dashboard feed. */
 .ac-n{display:block;font-size:28px;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
 .ac-label{display:block;font-size:13px;font-weight:600;margin-top:3px;line-height:1.35}
 .spark{display:block;width:100%;height:30px;margin-top:10px;overflow:visible}
@@ -293,7 +276,72 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ac-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px dashed var(--bd)}
 .ac-money{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 .ac-money em{display:block;font-style:normal;font-size:11px;font-weight:500;color:var(--mu);margin-top:2px}
+
+/* ---- departments.html finding cards ---- */
+.act-card{display:block;text-decoration:none;color:inherit;cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s;border-left:4px solid var(--bd)}
+.act-card:hover{transform:translateY(-2px);box-shadow:0 1px 2px rgba(16,24,40,.04),0 18px 34px -20px rgba(16,24,40,.28)}
+.act-card.p1{border-left-color:var(--er)}
+.act-card.p2{border-left-color:var(--wn)}
+.act-card.p3{border-left-color:var(--bd2)}
+.act-card.pai{border-left-color:#7c6cf0}
+.act-card.sel{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
+.act-card .pc{margin-bottom:10px}
 .act-card .go{margin-top:0;margin-left:auto}
+
+/* ---- dashboard: the "needs attention" feed ---- */
+/* One flat list. No gradients, no lift, no shadow - the only things separating
+   one card from the next are its priority accent and its two tags, so the feed
+   reads as a queue rather than a set of unrelated tiles. */
+.agl{display:flex;align-items:center;gap:8px;margin:14px 0 10px;flex-wrap:wrap}
+.split{margin:30px 0 4px;border:0;border-top:1px solid var(--bd)}
+
+/* Priority tag, and the source tag beside it. Both are tinted pills with a
+   darker tone of the same hue for the text, so they stay legible on the dark
+   theme without a separate dark-mode rule. */
+.tag{display:inline-flex;align-items:center;padding:2px 9px;border-radius:99px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.65;white-space:nowrap}
+.tag.p1{background:#fdebe9;color:#c4453a}
+.tag.p2{background:#fdf0da;color:#b9770e}
+.tag.p3{background:#efeaff;color:#5b46c4}
+.tag.sai{background:#efeaff;color:#5b46c4}
+.tag.smetric{background:color-mix(in srgb,var(--mu) 13%,transparent);color:var(--mu)}
+.ncard .tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+
+.ncard{display:flex;flex-direction:column;box-shadow:none;text-decoration:none;color:inherit;cursor:pointer;transition:border-color .15s;background:var(--card);border:1px solid var(--bd);border-left:4px solid var(--bd)}
+.ncard:hover{border-color:var(--bd2)}
+.ncard.p1{border-left-color:var(--er)}
+.ncard.p2{border-left-color:var(--wn)}
+.ncard.p3{border-left-color:#7c6cf0}
+/* Selection, not decoration: this is the card the open-claims table is currently
+   filtered to, so it has to be findable at a glance. */
+.ncard.sel{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
+.ac-v{display:block;font-size:12px;color:var(--mu);margin-top:7px;line-height:1.45}
+.ncard .go{align-self:flex-start;margin-top:14px}
+.ncard:hover .go{background:var(--pr-d);color:#fff}
+
+/* ---- dashboard: team-area donut card ---- */
+/* This card shares a grid row with two ten-row bar lists, so the chart alone
+   left most of it blank. The card is a flex column and the breakdown list takes
+   the slack with align-content:space-evenly, so extra height is shared out
+   between the rows instead of pooling under them. */
+.dcard{display:flex;flex-direction:column}
+.dtop{display:flex;align-items:center;justify-content:center;gap:18px}
+.dtop .donut{flex:none}
+.dtot{flex:1;min-width:0;display:grid;gap:9px}
+.dtot div{display:flex;align-items:baseline;gap:8px;font-size:12px;padding-bottom:8px;border-bottom:1px dashed var(--bd)}
+.dtot div:last-child{border-bottom:0;padding-bottom:0}
+.dtot em{margin-left:auto;font-style:normal;font-weight:700;color:var(--tx);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dlist{flex:1;display:grid;gap:12px;align-content:space-evenly;margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)}
+.drow{display:grid;gap:5px}
+.dline{display:flex;align-items:baseline;gap:8px;font-size:12px}
+.dlbl{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.dlbl i{width:9px;height:9px;border-radius:3px;flex:none}
+.dlbl>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dline b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.dline em{font-style:normal;margin-left:auto;min-width:46px;text-align:right;color:var(--mu);font-variant-numeric:tabular-nums;white-space:nowrap}
+.drow .trk{height:6px;border-radius:6px;background:var(--bd);overflow:hidden}
+.drow .trk span{display:block;height:100%;border-radius:6px;transition:width .3s}
+.dfoot{flex:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--bd);font-size:12px;color:var(--mu);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dfoot b{color:var(--tx)}
 
 /* ---- dashboard: paired bars ---- */
 .pb{display:grid;gap:10px;margin-top:2px}

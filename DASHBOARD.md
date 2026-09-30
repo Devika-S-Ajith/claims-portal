@@ -66,25 +66,59 @@ admin dashboard, so there is one route to each page rather than two.
 
 ---
 
-## 1. What Needs Your Attention
+## 1. Needs Attention
 
-The first thing on the page, in two groups: **AI suggestions**, which say what the numbers
-*mean*, and **The numbers**, which say what they *are*. The page heading above this is always
-**Claims Dashboard**; the year lives in the picker next to it and in the subtitle.
+The first thing on the page: a **single prioritised feed** of cards. AI‑detected patterns and
+plain metrics are no longer split into two sections — they sit in one grid, ordered purely by
+how urgent each item is, so the two kinds interleave by urgency rather than being filed
+separately. The page heading above this is always **Claims Dashboard**; the year lives in the
+picker next to it and in the subtitle.
 
-### AI suggestions — four insights
+### Card structure
+
+Every card is the same six parts, whatever its origin:
+
+| Part | Notes |
+|---|---|
+| Priority tag | **Do First** (red), **Do Next** (amber), **Review** (purple) |
+| Source tag | **AI Insight** (purple) or **Metric** (gray) |
+| Headline number | large, bold, tabular — a claim count |
+| Label | short name of the item |
+| Context line | one line of supporting detail |
+| Action button | a verb, not "See" — the button opens the open‑claims table, so the verb names what you will find there |
+
+Cards are flat: thin border, a 4px left accent in the priority colour, no gradient, no shadow.
+The grid is three across on desktop, two under 900px, one under 600px. Buttons sit on a common
+baseline in every row (flex column + `margin-top:auto`).
+
+**Sorting is by priority, and only by priority** — `prio` ascending, then `w` (weight) to break
+ties inside a tier. The source is a label, never a sort key. 2026, admin view, renders as:
+
+| # | Priority | Source | Card | n | Action |
+|---|---|---|---|---|---|
+| 1 | Do First | AI Insight | Recurring issue | 845 | Investigate pattern |
+| 2 | Do First | Metric | Open claims | 751 | Open queue |
+| 3 | Do First | Metric | Awaiting action | 819 | Review entries |
+| 4 | Do Next | AI Insight | High‑value impact | 377 | Investigate pattern |
+| 5 | Do Next | AI Insight | Potential CAPA | 701 | Start CAPA review |
+| 6 | Do Next | Metric | Repeat‑claim orders | 404 | Review orders |
+| 7 | Review | AI Insight | Emerging trend | 55 | Investigate pattern |
+
+Note the interleave: Do First is AI‑then‑metric, Do Next is AI‑then‑metric, Review is AI. If the
+feed were still grouped by origin, rows 1–4 would all be AI cards.
+
+### AI Insight cards
 
 These are **not** a model. Each is an explicit rule run over the monthly claim‑type series
 (`typeMonths` in `data.js`), which is what lets the page separate a standing fault from a
-one‑off spike. Where a card can carry one, it shows a 12‑point sparkline of that type's
-monthly count.
+one‑off spike.
 
-| Card | Fires when | Big number is | Value line |
-|---|---|---|---|
-| **Recurring issue** | A claim type appears in **every** month of the year (needs ≥ 3 months of data) and is not `(Unclassified)` | claims of that type in the year | its credit · `Type in 9 of 9 months` |
-| **High‑value impact** | Ranked by **credit**, not by count | claims of that type | its credit · `% of year credit` |
-| **Emerging trend** | The type's last 3 months average ≥ 1.5× its first 3, on ≥ 40 claims and ≥ 4 a month at the tail | claims of that type in the year | its credit · `Type · 3 → 9 a month` |
-| **Potential CAPA** | Always, when there is any open claim | size of the largest open pile by type | `0 of 4,254 carry a corrective action` · which type that pile is |
+| Card | Priority | Fires when | Big number is | Context line |
+|---|---|---|---|---|
+| **Recurring issue** | Do First | A claim type appears in **every** month of the year (needs ≥ 3 months of data) and is not `(Unclassified)` | claims of that type in the year | `Type in 9 of 9 months · credit` |
+| **High‑value impact** | Do Next | Ranked by **credit**, not by count | claims of that type | `Type · credit · % of year credit` |
+| **Potential CAPA** | Do Next | Always, when there is any open claim | size of the largest open pile by type | which type that pile is · `0 of 4,254 carry a corrective action` |
+| **Emerging trend** | Review | The type's last 3 months average ≥ 1.5× its first 3, on ≥ 40 claims and ≥ 4 a month at the tail | claims of that type in the year | `Type · 3 → 9 a month · credit` |
 
 **Each insight claims a different claim type.** Once Recurring issue has taken Sales Tax,
 High‑value impact moves to the next most expensive type, and so on. Without that rule all
@@ -94,33 +128,29 @@ classified are exactly where a corrective action is most overdue.
 
 **The floors are deliberate.** Without them a claim type going 3 → 9 a month on 20 claims
 would be reported as a trend, which is noise. Cards are omitted entirely when nothing
-qualifies, so a manager with a small caseload sees three AI cards rather than four.
+qualifies, so a manager with a small caseload sees fewer than four AI cards.
 
 **On "Potential CAPA", read the card literally.** It is a prompt to act, not a finding that a
 cause is known. Across the whole 31,235‑row export only 3 claims carry a `RootCauseAnalysis`,
 31 a `CorrectiveAction` and 14 a `PreventiveAction`, so the card reports that near‑zero
 coverage and names the pile to start with. The word *potential* is doing real work there.
 
-2026, admin view: **Recurring** Sales Tax, 845 claims, 9 of 9 months, $53.9K. **High‑value**
-Wrong Price, 377 claims, $55K, 9.7% of credit. **Emerging** Wrong Charges (Did Not Follow
-Quote), 55 claims, 3 → 9 a month. **CAPA** `(Unclassified)`, 701 open, 0 corrective actions
-recorded all year.
+**The 12‑point sparklines were dropped.** They appeared on only two of the four AI cards, which
+is exactly the ragged structure the unified feed exists to remove. `spark()` and its CSS remain
+in use on `departments.html`, which still renders its own four cards in the older shape.
 
-### The numbers — five cards
+### Metric cards
 
-Every count here is the exact number of rows the link opens, so the panel and the table below
-cannot disagree.
+Every count here is the exact number of rows the card's filter opens, so the feed and the table
+below cannot disagree. Only work that is **still outstanding** earns a card. Whole‑year totals
+used to sit in this group too, but they carry no action and have no filter to open, so they are
+absent here and appear once each in the **Three Numbers That Matter** tiles.
 
-| Card | Big number is | Counted from | Value line | Link filters by |
-|---|---|---|---|---|
-| **Total claims** | all claims in scope | every row | year credit · average per claim | jumps to the table, nothing to filter |
-| **Open claims** | still unresolved | `ClaimResolved = 0` | credit on them · % of intake | flag `Unresolved` |
-| **Resolved claims** | closed | `ClaimResolved = 1` | % closed · median days to close | flag `Resolved` |
-| **Awaiting action** | entry not finished | `ClaimEntryFinished ≠ 1` | % of intake | flag `Entry not finished` |
-| **Repeat‑claim orders** | claims on orders that raised more than one | `repeatClaims` | how many orders · credit on them | flag `Repeat‑claim order` |
-
-Chips: **Do first** on the two cards that are outstanding work, **For context** on the three
-that are simply facts about the year.
+| Card | Priority | Big number is | Counted from | Context line | Link filters by |
+|---|---|---|---|---|---|
+| **Open claims** | Do First | still unresolved | `ClaimResolved = 0` | credit on them · % of intake | flag `Unresolved` |
+| **Awaiting action** | Do First | entry not finished | `ClaimEntryFinished ≠ 1` | % of intake · entry not marked finished | flag `Entry not finished` |
+| **Repeat‑claim orders** | Do Next | claims on orders that raised more than one | `repeatClaims` | how many orders · credit on them | flag `Repeat‑claim order` |
 
 **There is no "Under investigation" card, because this data has no such state.** The
 `ClaimStatus` column is a numeric code (1, 2, 3, 4) populated on only 145 of 31,235 rows, and
@@ -129,10 +159,13 @@ that are simply facts about the year.
 filled with a proxy. **Awaiting action** is the honest stand‑in for outstanding work: it is
 literally an entry someone has not finished.
 
-**The two groups count different things.** The numbers are volume and status for the year.
-The AI cards count *all* claims of a type in the year — including closed ones — so Recurring
-issue's 845 is larger than Open claims' 751. The table at the bottom is the ground truth for
-anything still open, and clicking any card filters it.
+**The two card kinds count different things, even though they share one queue.** Metric cards
+are volume and status for the year, restricted to what is still open. The AI cards count *all*
+claims of a type in the year — including closed ones — so Recurring issue's 845 is larger than
+Open claims' 751 even though both are tagged Do First. That is why the source tag is on the
+card: the number alone cannot tell you whether you are looking at the open queue or at the
+whole year. The table at the bottom is the ground truth for anything still open, and clicking
+any card filters it.
 
 The panel is scoped to the selected year and to the signed‑in user's caseload.
 
@@ -179,9 +212,17 @@ It was removed — it duplicated this chart without adding anything.
 
 | Chart | Measure | Toggle |
 |---|---|---|
-| Claims by team area | claims per business area, donut, each slice labelled with count + share % | — |
+| Claims by team area | claims per business area, donut, plus a per‑area breakdown with share bar and a callout on the dominant area | — |
 | Top claim types | claims per `ClaimType`, top 10 with a *+N* expander | Count / Credit |
 | Credit by department | `sum(CreditAmount)` per `ClaimDept`, top 10 | Count / Credit |
+
+**The team‑area card carries a breakdown, not just a legend.** It sits in a three‑column grid
+row beside two ten‑row bar lists, so a bare donut plus a three‑line legend left most of the card
+blank. The card is now a flex column: donut and a three‑fact totals stack on top, a
+per‑area breakdown (name, count, share %, share bar) in the middle, and a footer callout
+naming the area carrying the most claims. The breakdown list is `flex:1` with
+`align-content:space-evenly`, so when a year has only two or three areas the extra height is
+shared out between the rows rather than pooling underneath them.
 
 Departments are rolled into six **team areas** so the mix is readable:
 
@@ -193,6 +234,76 @@ Departments are rolled into six **team areas** so the mix is readable:
 | Production & Quality | Product Defect, Imprinting, Packaging, Drinkware Damage, Factory, Drinkware Lids, Drinkware Digital, Drinkware |
 | Logistics & Fulfilment | Courier, Shortage, Shipping, Warehouse, Marketing, Unpacking, Sample Shipping, UPS, FEDEX |
 | Unassigned | (Unassigned), Claim Dept |
+
+### 4.1 Departments and warehouses
+
+`departments.html` is a separate page: the dashboard above is unchanged. Picking a department
+re-reads every figure on that page from that department.
+
+**The page is a drill-down, not a second dashboard.** It deliberately does *not* repeat the
+measures this dashboard already owns, because showing the same chart twice makes the reader
+wonder whether the two copies disagree. Removed from the department page:
+
+| Removed from `departments.html` | Lives on `dashboard.html` as |
+|---|---|
+| Month by month — claims and credit vs last year | This Year vs Last Year |
+| What this year cost — credit given vs memo sent, share of company | Where the Money Goes |
+| What the claims are — claim-type donut | Top claim types |
+| All departments — full league table with credit/median columns | Credit by department, What Is Still Going Wrong |
+
+The removed league table also duplicated the page's own **All departments side by side**, which
+is kept because it is the comparison the page exists to make.
+
+What stays is what the dashboard cannot answer for one department: the warehouse ranking, the
+department's own warehouse split, the 17-year trend cut to like-for-like months, the recurring
+claim-type read, the rate list against a peer, the side-by-side comparison, and the open-claim
+queue for that department. `test-all-pages.js` asserts each removed block stays removed, so a
+future edit cannot quietly reintroduce the duplicates.
+
+**The department list is the export's own nine columns, in the order the portal reports them**,
+as a flat dropdown — no grouping:
+
+| Department | Source `ClaimDept` spellings | Claims (all years) | Routed to |
+|---|---|---|---|
+| Art | Art, Imprinting, Wrong Art Charge, Drinkware Digital | 2,316 | TR |
+| Production | Product Defect, Factory, Packaging, Drinkware Damage, Drinkware Lids, Drinkware, Shortage, Unpacking, Stock, Warehouse, Internal Claim | 3,774 | TR |
+| OrderChange | Order Processing, Order Entry, Order Change, Order Log, Sample Entry, System, System Error, Access Data Base, Scheduling, Marketing, Claim Dept | 14,322 | LF |
+| Shipping | Shipping, Courier, UPS, FEDEX, Sample Shipping, Sample Dept, Sample Dep. | 1,640 | TR |
+| Invoicing | Billing, Invoicing, Credit, Sales Tax, Sales, Wrong Misc Charge | 3,767 | DO |
+| Pricing | Price Discrepancy, Pricing, Distributor Relations | 576 | DO |
+| Overseas | Overseas | 0 | — |
+| CustomerService | Customer Goodwill, Customer Service, OFR | 5,048 | LF |
+| Quoting | Quote, Quoting | 74 | DO |
+
+The nine **cannot be read from the export**: those columns hold `0` on all 31,521 rows.
+`ClaimDept` is the only populated field, and it carries 47 spellings, so `DEPT_MAP` in
+`add-warehouse.js` collapses them onto the nine. **7,427 rows carry no `ClaimDept` at all** and
+go to `OrderChange`, which is why it is 45% of the file. Routing is derived by counting each
+export owner's claims inside each department (`OWNER_OF_NINED`), not asserted by hand.
+
+**Warehouses are mocked.** A warehouse is where the product was sitting when the fault was
+found, so a warehouse holds one kind of stock and the **product family** decides the site — a
+print fault belongs to the print warehouse, not to the desk that logged it. `add-warehouse.js`
+assigns one from `ClaimType` (16,018 rows carry one, 110 distinct), falling back to keywords in
+`ClaimDescription`, then to a deterministic hash spread within the family.
+
+| Warehouse | Holds |
+|---|---|
+| A | Main store — general goods |
+| B | Art & print |
+| C | Drinkware & fragile |
+| D | Finished goods & overflow |
+| E | Dispatch & courier |
+| F | Order desk & service |
+
+This is a **mock**: replace the `Warehouse` column the moment a real site feed exists. It is
+deterministic — same input, same output, no randomness — so figures do not move between builds.
+Because the export has no unit counts, the page shows each site's **share of all claims**, never
+a defect rate; inventing a rate per site is the same mistake as the company-level one in §6.
+
+The six cards are ranked by claims, and the largest is labelled **Most defects**. Ranked by count
+because that is what the export supports — a share of claims, not a rate against goods handled.
+Each card also carries that site's top fault by credit, its open share, and a meter.
 
 ## 5. Where the Money Goes
 
@@ -232,6 +343,15 @@ scope. Clicking a row filters the table to that department.
 Every claim in the selected year that still needs work. Resolved claims are deliberately
 excluded from the whole dashboard.
 
+**The year and the open‑claim total are printed exactly once**, in the card title
+(`Open Claims — 751 in 2026 · your caseload`). The banner above the table used to repeat both,
+and the toolbar then repeated the count a third time as `751 / 751`, so the same figure appeared
+four times within one screen. Now:
+
+- **Resting state** — no banner at all. The toolbar's row counter is hidden too.
+- **Search or a card filter active** — the banner shows only the active filter and the button
+  that clears it, and the toolbar shows `N of 751 shown`.
+
 A claim is in the queue when **any** of these is true — flags therefore overlap, and one
 claim can appear under more than one group:
 
@@ -253,7 +373,7 @@ claim can appear under more than one group:
 | Owner | `own` | routed — [see below](#ownership-model). Admin only |
 | Status | `st` | derived: denied → `Denied`, else cancelled → `Cancelled`, else resolved → `Resolved`, else `Open` |
 | Credit | `am` | `CreditAmount` |
-| Why it is here | `reasons` | the flags above |
+| Root cause | `reasons` | the flags above |
 | Raised | `date` | `ClaimDate` |
 
 Grouping (collapsed, loaded on first open): **Flag**, **Department**, **Team area**,
@@ -387,7 +507,9 @@ Other Scheduling` (all zero on every row), `Split` (empty), `SyncFlag` (always `
 | No owning department | 7,427 (23.8%) | Nobody is accountable; 99.4% of these are still open |
 | Root cause almost never filled | 3 of 31,235 | Cause analysis is impossible. The fields meant to carry it are empty: `RootCauseAnalysis` 3 values, `CorrectiveAction` 31, `PreventiveAction` 14, `ProposedSolution` 1 |
 | No assignee column | — | Ownership is modelled, see below |
-| No location column | — | "Per location" is shown as per department / per team area |
+| No warehouse column | all 31,521 | `add-warehouse.js` appends a mock A–F `Warehouse` column (where the product sat when the fault was found) so the department page can rank sites. Mocked, not real: see §4.1 |
+| Department columns empty | all 31,521 | `Art`, `Production`, `OrderChange`, `Shipping`, `Invoicing`, `Pricing`, `Overseas`, `CustomerService`, `Quoting` are the literal value `0` on every row. They are placeholders. The only populated department field is `ClaimDept`, 47 spellings, collapsed to the nine by `DEPT_MAP` |
+| No `Overseas` claims | 0 rows | Listed in the picker as required, and shown with an empty state rather than dropped |
 | Currency blank | 31,235 | No conversion is possible; every figure is as‑exported |
 | Near‑duplicate departments | 1,351 claims | `Sample Dept`/`Sample Dep.`, `System`/`System Error`, the four `Drinkware*`, `Courier`/`UPS`/`FEDEX` |
 | Placeholder department | 15 claims | `Claim Dept` is not a real team |
