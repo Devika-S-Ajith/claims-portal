@@ -84,6 +84,17 @@
       const or = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : v);
       const fmtDate = (d) => (d ? esc(String(d).slice(0, 10)) : '—');
 
+      // Carrier is not a column in the export. build-data.js reads it out of the
+      // claim's department, claim type and description, so a claim that never
+      // names a courier carries nothing and says so. 'UPS/FedEx' means the text
+      // named both, which happens when FedEx Ground is billed to a UPS shipper
+      // account, and is reported rather than resolved to whichever came first.
+      const carrierNote = (c) => {
+        if (!c) return '<span class="mu" style="font-size:11px" title="No claim on this order names a carrier in its department, type or description.">not stated in the claim</span>';
+        if (c === 'UPS/FedEx') return '<span class="b Med">UPS/FedEx</span> <span class="mu" style="font-size:11px">the claims name both</span>';
+        return esc(c) + ' <span class="mu" style="font-size:11px">named in the claim</span>';
+      };
+
       // Status is derived from the Resolved / Denied / Cancelled flags, so the
       // trace can only mark the step the flags actually prove.
       const traceStep = { Open: 0, Denied: 10, Cancelled: 10, Resolved: 10 }[claim.st] ?? 0;
@@ -155,15 +166,19 @@
             <dl class="dl">
               ${dd('Order ID', `<a style="color:var(--pr)" href="orders.html">${order[0]}</a>`)}
               ${dd('Order type', esc(order[7] || 'Customer Order'))}
+              ${dd('Carrier', carrierNote(order[9]))}
               ${dd('Claims raised', num(order[1]))}
               ${dd('Departments involved', num(order[4]))}
               ${dd('Claim window', `${esc(order[5])} → ${esc(order[6])}`)}
               ${dd('Routed owners', esc((order[8] || '').split('~').map((id) => ownerName(id)).join(', ') || '—'))}
             </dl>` : `<p class="mu">Order <b>${esc(claim.or || '—')}</b> is not in the embedded order set
-              (only orders that raised a repeat or open claim are carried in the page data).</p>`}
+              (only orders that raised a repeat or open claim are carried in the page data).</p>
+            <dl class="dl">${dd('Carrier', carrierNote(claim.ca))}</dl>`}
             <p class="mu" style="font-size:11px;margin:12px 0 0">
               The claims export contains only the OrderID. Product, quantity, unit price, artwork,
-              batch, supplier and carrier are not available, so no order value can be shown.
+              batch and supplier are not available, so no order value can be shown. Carrier is
+              read from the claim text rather than a field: this claim${claim.ca
+                ? ` names <b>${esc(claim.ca)}</b>` : ' names no carrier'}.
             </p>
           </div>
         </div>

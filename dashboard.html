@@ -12,7 +12,6 @@
     const COLORS = ['#6366f1', '#3b82c4', '#e8a13a', '#7d4fc0', '#ef6c6c', '#4b9c6c', '#b3a49b'];
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const TYPES_TOP = 10;
-    const DEPT_TOP = 10;
 
     let year = LATEST_YEAR;
     let typesExpanded = false;
@@ -20,7 +19,16 @@ let focus = null;
 let queueGroup = 'reason';
 let queueSearch = '';
     let rateMetric = 'open';
-    const metric = { types: 'count', dept: 'value' };
+    // Department comparison used to be three charts; it is one sortable table now.
+    // deptSort is the active column, deptDir the direction within it.
+    let deptSort = 'count';
+    let deptDir = -1;
+    // 'amount' or 'share' for the ranked credit bars under Where the Money Goes.
+    let deptMoney = 'amount';
+    // 'claims' | 'credit' | 'open' | 'damage' | 'name' for the carrier scorecard.
+    let carSort = 'claims';
+    let carDir = -1;
+    const metric = { types: 'count' };
 
     const pnum = (a, b) => (b ? (a / b) * 100 : 0);
     // Whole dollars - cents are noise on a card that also shows a claim count.
@@ -53,6 +61,15 @@ let queueSearch = '';
       return isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
     }
 
+    // [name, claims, orders, open, openCredit, credit, damageClaims, medianDays, p90Days, timedCloses]
+    // Scoped exactly like deptFacts. Re-aggregated per owner in the build rather
+    // than filtered, because a carrier's claims are spread across every owner.
+    function carrierFacts() {
+      const bucket = CARRIER_FACTS[year] || CARRIER_FACTS.all || { all: [] };
+      const me = getSession();
+      return isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
+    }
+
     // The queue covers every open claim ever raised. The dashboard is year
     // scoped, so it is cut to the selected year - which also means every count
     // on this page is the same population the table below shows.
@@ -66,10 +83,14 @@ let queueSearch = '';
     let S, PREV;
 
     // ---------- small shared pieces ----------
+    // Direction and size only - no colour, no good/bad verdict, no pre-built
+    // string. The stat line builds the sentence from this, because whether a rise
+    // is welcome depends on the line: more claims raised is not obviously good
+    // news, and more credit given is not good news at all.
     function delta(now, prev) {
       if (!prev) return null;
       const d = (now - prev) / prev;
-      return { up: d > 0, good: d < 0, txt: (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '– ') + Math.abs(d * 100).toFixed(1) + '% vs last year' };
+      return { dir: d > 0 ? 'up' : d < 0 ? 'down' : 'flat', mag: Math.abs(d * 100).toFixed(1) + '%' };
     }
 
     // Compact money for axis ticks and labels that only have ~50px of width.
@@ -116,7 +137,6 @@ let queueSearch = '';
       const color = (n) => COLORS[n % COLORS.length];
       const countTotal = data.reduce((s, d) => s + d[1], 0) || 1;
       const total = byValue ? data.reduce((s, d) => s + d[2], 0) : countTotal;
-      const credit = data.reduce((s, d) => s + (d[2] || 0), 0);
 
       let offset = 25;
       const arcs = data.map((d, n) => {
@@ -145,14 +165,22 @@ let queueSearch = '';
           : `<span class="mu">Biggest: <b>${esc(lead[0])}</b> · ${leadPct.toFixed(1)}%</span>`
         : '';
 
-      const center = byValue ? usd(total) : num(total);
+      // The centre used to print the year's total claim count, which the stat
+      // line at the top of the page already states, and the breakdown under it
+      // repeated the same figure again as a dollars total. Both are gone: the
+      // centre now carries a measure the page states nowhere else, and the
+      // breakdown carries composition only.
+      //
+      // "Resolved" is the status bucket, not "not ClaimResolved", so denied and
+      // cancelled claims are not counted as unfinished work here.
+      const centerPct = S.total ? (S.resolved / S.total) * 100 : 0;
       return (
         `<div class="dtop">
-            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of claims">${arcs}` +
-            `<text x="21" y="23" text-anchor="middle" font-size="${byValue ? 6 : 7}" font-weight="600" fill="currentColor">${center}</text></svg>
+            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of claims by team area">${arcs}` +
+            `<text x="21" y="22" text-anchor="middle" font-size="6.2" font-weight="600" fill="currentColor">${centerPct.toFixed(1)}%</text>` +
+            `<text x="21" y="26.4" text-anchor="middle" font-size="2.5" font-weight="600" fill="#8fa69a" letter-spacing=".06em">RESOLVED</text></svg>
             <div class="dtot">
-              <div><span class="mu">Claims</span><em>${num(countTotal)}</em></div>
-              <div><span class="mu">Credit</span><em>${usd(credit)}</em></div>
+              <div><span class="mu">Resolved</span><em>${num(S.resolved)}</em></div>
               <div><span class="mu">Team areas</span><em>${num(data.length)}</em></div>
             </div>
           </div>
@@ -161,13 +189,16 @@ let queueSearch = '';
       );
     }
 
+    // rowsFor the types list carry a stable id and their own type name, because
+    // the AI insight cards link straight to a specific row of this list.
     function hbar(key, data, max) {
       const i = metric[key] === 'value' ? 2 : 1;
       const top = max || Math.max(...data.map((d) => d[i]), 1);
-      return data.map((d) => {
+      return data.map((d, n) => {
         const v = d[i];
+        const attrs = key === 'types' ? ` id="ty-${n}" data-ty="${esc(d[0])}"` : '';
         return (
-          `<div class="hb${metric[key] === 'value' ? ' wide' : ''}">` +
+          `<div class="hb${metric[key] === 'value' ? ' wide' : ''}"${attrs}>` +
           `<div title="${esc(d[0])}">${esc(d[0])}</div>` +
           `<div class="trk"><span style="width:${pnum(v, top).toFixed(1)}%"></span></div>` +
           `<b>${fmt(key, v)}</b></div>`
@@ -175,23 +206,146 @@ let queueSearch = '';
       }).join('');
     }
 
-    // Two measures per department, side by side. The old report showed this with
-    // no x-axis labels at all, so the reader could not tell which bar was which.
-    function pairBars(rows, labels) {
-      const top = Math.max(...rows.flatMap((d) => [d.credit, d.memo]), 1);
-      return (
-        `<div class="pb">` +
-        rows.map((d) => `
-          <div class="pbg">
-            <div class="pbl" title="${esc(d.dept)}">${esc(d.dept)}</div>
-            <div class="pbars">
-              <div class="trk" title="${esc(labels[0])}: ${usd(d.credit)}"><span style="width:${pnum(d.credit, top).toFixed(1)}%;background:linear-gradient(90deg,#6366f1,#8b93f8)"></span></div>
-              <div class="trk" title="${esc(labels[1])}: ${usd(d.memo)}"><span style="width:${pnum(d.memo, top).toFixed(1)}%;background:linear-gradient(90deg,#e8a13a,#f2c778)"></span></div>
-            </div>
-            <div class="pbv">${usd(d.credit)}</div>
-          </div>`).join('') +
-        `</div>`
+    // Credit by department, ranked, with the share of the whole available as a
+    // second reading of the same column. This absorbs both charts it replaces:
+    // the old "Credit by department" count/credit toggle and the paired
+    // credit-vs-memo chart. Both were read off the same DEPT_FACTS credit column,
+    // so side by side they were two ways of reading one number. The memo gap -
+    // credit promised and never converted into a credit memo - is real
+    // information, so it survives as a figure under the bars instead of as a
+    // second set of bars.
+    function deptCreditBars(df) {
+      const rows = df.slice().sort((a, b) => b[6] - a[6]).slice(0, 8);
+      const total = df.reduce((a, d) => a + (d[6] || 0), 0);
+      const max = Math.max(...rows.map((d) => d[6]), 1);
+      const byShare = deptMoney === 'share';
+      return rows.map((d) => `
+          <div class="hb wide">
+            <div title="${esc(d[0])}">${esc(d[0])}</div>
+            <div class="trk"><span style="width:${(byShare ? pnum(d[6], total) : pnum(d[6], max)).toFixed(1)}%"></span></div>
+            <b>${byShare ? pct(d[6], total) : usd(d[6])}</b>
+          </div>`).join('');
+    }
+
+    // One table for all three department measures. Count, credit and rate used to
+    // be three separate charts on the same department axis, stacked one under the
+    // other, so a reader comparing a department's volume against its money
+    // against its rate had to hold three lists in their head. Here they are
+    // three columns of one row, and the row is the unit of comparison.
+    // Every column sorts; the rate column follows whichever rate is selected.
+    // The rate used to be a chart that dropped any department with a denominator
+    // under 10, because 1 of 1 is 100% and reads as a crisis. A table cannot drop
+    // rows without hiding departments, so a thin base is flagged instead: the
+    // figure goes muted, the bar goes flat, and the title says what it is off.
+    const THIN_BASE = 10;
+    function deptTable(df, rk, rateAvg) {
+      const rows = df.map((d) => ({
+        dept: d[0],
+        count: d[3],
+        credit: d[6],
+        den: rk.den(d),
+        rate: pnum(rk.of(d), rk.den(d))
+      }));
+      const maxC = Math.max(...rows.map((r) => r.count), 1);
+      const maxV = Math.max(...rows.map((r) => r.credit), 1);
+      const dir = deptDir;
+      const sorted = rows.slice().sort((a, b) =>
+        deptSort === 'dept' ? dir * a.dept.localeCompare(b.dept) : dir * (a[deptSort] - b[deptSort])
       );
+
+      const th = (k, label, align) => {
+        const on = deptSort === k;
+        return `<th class="${on ? 'on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
+          `<button type="button" onclick="setDeptSort('${k}')">${esc(label)}` +
+          `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
+      };
+
+      const body = sorted.map((r) => {
+        const thin = r.den < THIN_BASE;
+        const hot = !thin && r.rate > rateAvg;
+        const tip = `Open cases in ${r.dept}` +
+          (thin ? ` · ${r.rate.toFixed(1)}% is off a base of only ${num(r.den)}, too small to read` : '');
+        return `<tr onclick="jump('de','${esc(r.dept)}')" tabindex="0"
+            onkeydown="if(event.key==='Enter'||event.key===' '){jump('de','${esc(r.dept)}');return false}"
+            title="${esc(tip)}">
+          <td class="name">${esc(r.dept)}</td>
+          <td class="n"><b>${num(r.count)}</b><span class="mb"><i style="width:${pnum(r.count, maxC).toFixed(1)}%"></i></span></td>
+          <td class="n"><b>${usd(r.credit)}</b><span class="mb"><i style="width:${pnum(r.credit, maxV).toFixed(1)}%"></i></span></td>
+          <td class="n"><b class="${thin ? 'thin' : hot ? 'hi' : ''}">${r.rate.toFixed(1)}%</b>
+            <span class="mb"><i class="${thin ? 'thin' : hot ? 'hi' : ''}" style="width:${Math.min(100, r.rate).toFixed(1)}%"></i></span></td>
+        </tr>`;
+      }).join('');
+
+      return `<div class="tw" style="border:0;margin-top:4px"><table class="ctable">
+          <thead><tr>${th('dept', 'Department', 'left')}${th('count', 'Count', 'right')}${th('credit', 'Credit', 'right')}${th('rate', rk.label, 'right')}</tr></thead>
+          <tbody>${body}</tbody>
+        </table></div>`;
+    }
+
+    // Carrier scorecard. The export has no Carrier column, so the carrier is read
+    // out of the department, the claim type and the description; build-data.js
+    // does that once and this is a lookup. Three things are deliberately absent:
+    //
+    //  - "claim rate, claims as a % of that carrier's total order volume". The
+    //    export only lists orders that raised a claim, so the denominator is the
+    //    numerator and the rate would read ~100% for everyone. Open claim rate
+    //    (open / claims) is the substitute, and it is a real measurement.
+    //  - A single carrier per claim. 353 claims name both UPS and FedEx - FedEx
+    //    Ground billed to a UPS shipper account, freight split across a truck and
+    //    UPS - and they are a row of their own rather than counted twice.
+    //  - Any modelling. Every number here is counted out of the CSV.
+    // Sort key -> tuple index, so the comparator is a lookup rather than a
+    // chain of ternaries. 'p90' is column 8; an untimed carrier reads 0 and
+    // sorts last, which is the honest order for an unmeasurable cell.
+    const CARRIER_KEY = { name: 0, claims: 1, open: 3, damage: 6, credit: 5, p90: 8 };
+    const CARRIER_COLS = [
+      ['name', 'Carrier', 'left'],
+      ['claims', 'Claims', 'right'],
+      ['open', 'Open', 'right'],
+      ['damage', 'Damage or loss', 'right'],
+      ['credit', 'Credit', 'right'],
+      ['p90', 'Slowest 10% closed in', 'right']
+    ];
+    function carrierTable(cf) {
+      if (!cf.length) {
+        return '<p class="mu" style="margin:14px 0 4px">No claim in ' + esc(String(year)) +
+          ' names a carrier in its department, type or description.</p>';
+      }
+      const maxC = Math.max(...cf.map((c) => c[1]), 1);
+      const maxV = Math.max(...cf.map((c) => c[5]), 1);
+      const dir = carDir;
+      const ki = CARRIER_KEY[carSort];
+      const sorted = cf.slice().sort((a, b) =>
+        carSort === 'name' ? dir * String(a[0]).localeCompare(String(b[0])) : dir * (a[ki] - b[ki])
+      );
+      const th = (k, label, align) => {
+        const on = carSort === k;
+        return `<th class="${on ? 'on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
+          `<button type="button" onclick="setCarSort('${k}')">${esc(label)}` +
+          `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
+      };
+      const body = sorted.map((c) => {
+        const [name, claims, orders, open, openCredit, credit, damage, med, p90, timed] = c;
+        const both = name === 'UPS/FedEx';
+        const openRate = pnum(open, claims);
+        const tip = `${claims} claims against ${orders} orders · ${pct(open, claims)} still open` +
+          (both ? ' · names both carriers in the same claim, so it is not filed under either' : '');
+        return `<tr onclick="jump('ca','${esc(name)}')" tabindex="0"
+            onkeydown="if(event.key==='Enter'||event.key===' '){jump('ca','${esc(name)}');return false}"
+            title="${esc(tip)}">
+          <td class="name">${esc(name)}${both ? ' <span class="mu" style="font-size:11px">(both named)</span>' : ''}</td>
+          <td class="n"><b>${num(claims)}</b><span class="mb"><i style="width:${pnum(claims, maxC).toFixed(1)}%"></i></span></td>
+          <td class="n"><b>${num(open)}</b><span class="mu" style="font-size:11px">${openRate.toFixed(1)}%</span>
+            <span class="mb"><i style="width:${Math.min(100, openRate).toFixed(1)}%"></i></span></td>
+          <td class="n"><b>${num(damage)}</b><span class="mu" style="font-size:11px">${pct(damage, claims)}</span></td>
+          <td class="n"><b>${usd(credit)}</b><span class="mb"><i style="width:${pnum(credit, maxV).toFixed(1)}%"></i></span></td>
+          <td class="n"><b>${timed ? p90.toFixed(1) + 'd' : '—'}</b><span class="mu" style="font-size:11px">${timed ? 'median ' + med.toFixed(1) + 'd' : 'no closed claims'}</span></td>
+        </tr>`;
+      }).join('');
+      return `<div class="tw" style="border:0;margin-top:4px"><table class="ctable">
+          <thead><tr>${CARRIER_COLS.map(([k, l, a]) => th(k, l, a)).join('')}</tr></thead>
+          <tbody>${body}</tbody>
+        </table></div>`;
     }
 
     // Month-on-month, this year against the same months last year.
@@ -306,6 +460,40 @@ let queueSearch = '';
     function setYear(y) { year = y; typesExpanded = false; focus = null; queueSearch = ''; render(); }
     function toggleTypes() { typesExpanded = !typesExpanded; render(); }
     function setRate(k) { rateMetric = k; render(); }
+    function setDeptMoney(m) { deptMoney = m; render(); }
+    function setCarSort(k) {
+      if (carSort === k) carDir = -carDir;
+      else { carSort = k; carDir = k === 'name' ? 1 : -1; }
+      render();
+    }
+
+    // Clicking the column you are already sorted on flips the direction, which is
+    // what a reader expects from a sortable header. A new column starts in the
+    // useful direction: names A-Z, measures largest first.
+    function setDeptSort(k) {
+      if (deptSort === k) deptDir = -deptDir;
+      else { deptSort = k; deptDir = k === 'dept' ? 1 : -1; }
+      render();
+    }
+
+    // An AI insight card names a claim type; the Top claim types list below holds
+    // that type as a row. This scrolls to it and flashes it, so the two are one
+    // thought rather than two disconnected places. If the type is outside the
+    // collapsed top ten it expands the list first, otherwise the link would point
+    // at a row that is not rendered.
+    function viewInTable(type) {
+      const i = S.types.findIndex((t) => t[0] === type);
+      if (i < 0) return;
+      if (i >= (typesExpanded ? S.types.length : TYPES_TOP)) typesExpanded = true;
+      render();
+      const el = document.getElementById('ty-' + i);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('flash');
+      void el.offsetWidth;
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1900);
+    }
 
     // Reporting-year dropdown, same open/close behaviour as the nav menu.
     function yearMenu(btn) {
@@ -478,19 +666,35 @@ let queueSearch = '';
 
     // Every card is the same six-part shape regardless of origin: priority tag,
     // source tag, headline number, label, one line of context, one verb. The
-    // flex column plus margin-top:auto on the button keeps every button on the
-    // same baseline in a row, which a fixed structure is what buys you.
+    // flex column plus margin-top:auto on the action row keeps every row of
+    // actions on the same baseline, which a fixed structure is what buys you.
+    //
+    // The card is a div, not an anchor, because an AI card now carries a second
+    // control - the link into Top claim types - and a button inside an anchor is
+    // not valid HTML and is not reliably clickable. The stretched ::after on
+    // .ac-jump keeps the whole card clickable for the primary jump; the action
+    // row sits above it on its own z-index.
     const actCard = (a) => {
       const sel = focus && a.kind && focus.kind === a.kind && focus.value === a.value ? ' sel' : '';
       const [pLabel, pCls] = PRIO[a.prio];
       const [sLabel, sCls] = SRC[a.src];
-      return `<a class="card ncard ${pCls}${sel}" href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false">
-          <span class="tags"><span class="tag ${pCls}">${pLabel}</span><span class="tag ${sCls}">${sLabel}</span></span>
-          <b class="ac-n">${num(a.n)}</b>
-          <span class="ac-label">${esc(a.label)}</span>
-          <span class="ac-v">${esc(a.v)}</span>
-          <span class="go">${esc(a.go)} →</span>
-        </a>`;
+      // Only a card that names a claim type can offer the link; the metric cards
+      // count a population rather than point at a row, so a link would be a lie.
+      const view = a.kind === 'ty' && S.types.some((t) => t[0] === a.value)
+        ? `<button class="ac-view" type="button" onclick="viewInTable('${esc(a.value)}');return false">View in table &#8595;</button>`
+        : '';
+      return `<div class="card ncard ${pCls}${sel}">
+          <a class="ac-jump" href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false">
+            <span class="tags"><span class="tag ${pCls}">${pLabel}</span><span class="tag ${sCls}">${sLabel}</span></span>
+            <b class="ac-n">${num(a.n)}</b>
+            <span class="ac-label">${esc(a.label)}</span>
+            <span class="ac-v">${esc(a.v)}</span>
+          </a>
+          <div class="ac-act">
+            <span class="go">${esc(a.go)} &#8594;</span>
+            ${view}
+          </div>
+        </div>`;
     };
 
     // One grid, one sort. The group header that used to split AI cards from
@@ -663,6 +867,7 @@ let queueSearch = '';
       const me = getSession();
       const admin = isAdmin();
       const df = deptFacts();
+      const cf = carrierFacts();
       const n = monthsSoFar();
       const cur = upTo(S, n), prev = upTo(PREV, n);
       const dClaims = delta(cur.c, prev.c);
@@ -670,14 +875,27 @@ let queueSearch = '';
       const typesShown = typesExpanded ? S.types : S.types.slice(0, TYPES_TOP);
       const openItems = queue().length;
 
-      const kpis = [
-        ['Claims raised', num(S.total), dClaims ? `<span class="${dClaims.up ? 'up' : 'dn'}">${dClaims.txt}</span>` : '<span class="flat">–</span>'],
-        ['Credit given', usd(S.credit), dCredit ? `<span class="${dCredit.up ? 'up' : 'dn'}">${dCredit.txt}</span>` : '<span class="flat">–</span>'],
-        ['Still open', num(S.unresolved), `<span class="up">${pct(S.unresolved, S.total)}</span>`]
+      // The stat line under the page title. Plain sentences, not pills: a red or
+      // green badge states a verdict, and on these three lines "up" is not one
+      // thing - more claims raised is neutral, more credit given is bad, and
+      // fewer open claims is good. The glyph carries the direction, the text
+      // carries the number.
+      // Claims and credit are compared over the same number of months in both
+      // years (see monthsSoFar), because 9 months against 12 is not a trend.
+      // Still open has no like-for-like series to compare against - the data is
+      // a full-year block, not a monthly one - so it states its share instead of
+      // inventing a comparison that would be quietly wrong.
+      const compare = (d) => !d
+        ? 'No comparable prior period'
+        : `${d.dir === 'up' ? '↑' : d.dir === 'down' ? '↓' : '–'} ${d.mag} from last year`;
+      // named statLine, not stats - `stats(y)` is the year resolver above, and
+      // reusing the name here would put it in the TDZ for all of render()
+      const statLine = [
+        ['Claims raised', num(S.total), compare(dClaims)],
+        ['Credit given', usd(S.credit), compare(dCredit)],
+        ['Still open', num(S.unresolved), `${pct(S.unresolved, S.total)} of claims raised this year`]
       ];
 
-      const moneyDepts = df.slice().sort((a, b) => b[6] - a[6]).slice(0, 8)
-        .map((d) => ({ dept: d[0], credit: d[6], memo: d[8] }));
       const memoGap = df.reduce((a, d) => a + (d[6] - d[8]), 0);
 
       const RATES = {
@@ -686,11 +904,6 @@ let queueSearch = '';
         free: { label: 'Cost nothing', of: (d) => d[10], den: (d) => d[3] }
       };
       const rk = RATES[rateMetric];
-      const rateRows = df
-        .filter((d) => rk.den(d) >= 10)
-        .map((d) => ({ d, v: pnum(rk.of(d), rk.den(d)) }))
-        .sort((a, b) => b.v - a.v)
-        .slice(0, 10);
       const rateAvg = pnum(df.reduce((a, d) => a + rk.of(d), 0), df.reduce((a, d) => a + rk.den(d), 0));
 
       document.getElementById('app').innerHTML = `
@@ -709,18 +922,19 @@ let queueSearch = '';
           <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
         </div>
 
+        <div class="stats">
+          ${statLine.map(([label, value, note]) => `
+            <div class="stat">
+              <span class="sl">${esc(label)}</span>
+              <b class="sv">${value}</b>
+              <span class="sc">${esc(note)}</span>
+            </div>`).join('')}
+        </div>
+
         ${sect('Needs Attention', 'Patterns and metrics, most urgent first', `<span class="b High">${num(openItems)} open</span>`)}
         ${renderFindings()}
 
         <div class="split"></div>
-
-        ${sect('The Three Numbers That Matter')}
-        <div class="grid g4">
-          ${kpis.map(([label, value, note]) => `
-            <div class="card kpi">
-              <small>${label}</small><b>${value}</b>${note}
-            </div>`).join('')}
-        </div>
 
         ${sect('This Year vs Last Year', `${MONTHS[0]}–${MONTHS[n - 1]} of both years`)}
         <div class="grid g2">
@@ -735,7 +949,7 @@ let queueSearch = '';
         </div>
 
         ${sect('Where the Claims Come From')}
-        <div class="grid g3">
+        <div class="grid g2">
           <div class="card dcard">
             ${cardTitle('Claims by team area', '')}
             ${donut('area', S.area)}
@@ -749,23 +963,44 @@ let queueSearch = '';
               <button class="btn s" onclick="toggleTypes()">${typesExpanded ? '— Top 10' : `+ ${S.types.length - TYPES_TOP}`}</button>
             </div>
           </div>
-          <div class="card">
-            ${cardTitle('Credit by department', '', seg('dept', 'Count', 'Credit'))}
-            ${hbar('dept', df.slice(0, DEPT_TOP).map((d) => [d[0], d[3], d[6]]))}
-            <div class="row" style="margin-top:10px">
-              <span class="mu" style="font-size:12px">${Math.min(DEPT_TOP, df.length)} of ${df.length} · ${usd(df.reduce((a, d) => a + d[6], 0))}</span>
-            </div>
+        </div>
+
+        ${sect('Department Comparison', 'Count, credit and rate on one axis — click any column to sort')}
+        <div class="card">
+          ${cardTitle('', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
+          ${deptTable(df, rk, rateAvg)}
+          <div class="row" style="margin-top:10px">
+            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rateAvg.toFixed(1)}% average · click a row to open its cases</span>
+          </div>
+        </div>
+
+        ${sect('Carrier Scorecard', 'Which courier the claims are actually against — click any column to sort')}
+        <div class="card">
+          ${cardTitle('Carrier scorecard', '')}
+          ${carrierTable(cf)}
+          <div class="row" style="margin-top:10px">
+            <span class="mu" style="font-size:12px">${cf.length
+              ? cf.reduce((a, c) => a + c[1], 0) + ' of ' + num(S.total) + ' claims name a carrier (' +
+                pct(cf.reduce((a, c) => a + c[1], 0), S.total) + ' of claims raised)'
+              : 'No claims name a carrier this year'} · the export has no Carrier column, so it is read
+              from the department, claim type and description · no claim rate, because the export
+              lists only orders that raised a claim, so the denominator would be the numerator
+              · click a row to open its cases</span>
           </div>
         </div>
 
         ${sect('Where the Money Goes')}
         <div class="grid g2">
           <div class="card">
-            ${cardTitle('Credit given vs memo sent', '', '<span class="b ' + (memoGap > 0 ? 'High' : 'Low') + '">' + (memoGap > 0 ? usd(memoGap) + ' gap' : 'no gap') + '</span>')}
-            ${pairBars(moneyDepts, ['Credit given', 'Credit memo sent'])}
-            <div class="legend row">
-              <span><i style="background:#6366f1"></i> Credit given</span>
-              <span><i style="background:#e8a13a"></i> Memo sent</span>
+            ${cardTitle('Credit by department', '', `<div class="seg" role="group">
+              <button type="button" class="${deptMoney === 'amount' ? 'on' : ''}" aria-pressed="${deptMoney === 'amount'}" onclick="setDeptMoney('amount')">Amount</button>
+              <button type="button" class="${deptMoney === 'share' ? 'on' : ''}" aria-pressed="${deptMoney === 'share'}" onclick="setDeptMoney('share')">Percent</button>
+            </div>`)}
+            ${deptCreditBars(df)}
+            <div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${Math.min(8, df.length)} of ${df.length} departments${memoGap > 0
+                ? ` · <span class="b High">${usd(memoGap)}</span> credited with no credit memo sent`
+                : ' · every credit has a matching memo'}</span>
             </div>
           </div>
           <div class="card">
@@ -777,28 +1012,25 @@ let queueSearch = '';
           </div>
         </div>
 
-        ${sect('What Is Still Going Wrong')}
-        <div class="card">
-          ${cardTitle('Problem rate by department', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
-          <div class="rates">
-            ${rateRows.map(({ d, v }) => `
-              <div class="hb wide" onclick="jump('de','${esc(d[0])}')" style="cursor:pointer" title="Open claims in ${esc(d[0])}">
-                <div>${esc(d[0])}</div>
-                <div class="trk"><span style="width:${Math.min(100, v).toFixed(1)}%;background:${v > rateAvg ? 'linear-gradient(90deg,#d9534f,#f0a09a)' : 'linear-gradient(90deg,#6366f1,#8b93f8)'}"></span></div>
-                <b>${v.toFixed(1)}%</b>
-              </div>`).join('')}
-          </div>
-          <div class="row" style="margin-top:10px">
-            <span class="mu" style="font-size:12px">Red = above the ${rateAvg.toFixed(1)}% average · min 10 claims</span>
-            <div class="sp"></div>
-            <span class="b Low">Click a row</span>
-          </div>
-        </div>
-
         <div class="card" id="attention" style="margin-top:24px;scroll-margin-top:80px">
           ${cardTitle('Open Claims', `${num(openItems)} in ${year} · ${admin ? 'all owners' : 'your caseload'}`, `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
+          <p class="mu ocap">${openCaption(openItems, S.unresolved)}</p>
           ${renderAttention()}
         </div>`;
+    }
+
+    // The stat line says "Still open" and this table is the work queue below it.
+    // Those are two different populations and used to sit on the page with no
+    // stated relationship, which is the kind of thing a reader resolves by
+    // assuming they are the same number. The queue is the wider of the two: it
+    // also holds denied, cancelled and never-finished entries, all of which are
+    // work someone still has to close out.
+    function openCaption(shown, unresolved) {
+      const extra = shown - unresolved;
+      const head = `Showing all ${num(shown)} open case${shown === 1 ? '' : 's'} in ${year}.`;
+      if (!extra) return `${head} This is the same ${num(unresolved)} the "Still open" figure at the top of the page counts.`;
+      return `${head} The "Still open" figure at the top of the page (${num(unresolved)}) counts only claims not marked resolved, ` +
+        `so this table is ${num(extra)} wider &mdash; it also holds denied, cancelled and never-finished entries.`;
     }
 
     function main() {

@@ -14,7 +14,13 @@
     // customer, product, quantity, price or carrier. So an "order" here is a
     // real aggregate of the claims raised against it, and the page says so
     // rather than inventing an invoice.
-    //   [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners]
+    //   [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners, carrier]
+    //
+    // A carrier is the one thing here that is not a column in the export. It is
+    // read out of the department, claim type and description of the claims
+    // raised against the order, in build-data.js, and it is blank when none of
+    // them name one - which is most orders. A blank means "not stated", not
+    // "shipped by ourselves", so it is rendered as a dash and never guessed.
     // ------------------------------------------------------------------
     let selectedOrder = '';
     let orderQuery = '';
@@ -22,6 +28,14 @@
 
     const orderOwners = (o) => (o[8] || '').split('~').filter(Boolean);
     const orderLabel = (o) => o[7] || 'Customer Order';
+    const CARRIER_MIXED = 'UPS/FedEx';
+    function carrierCell(c, withWhy) {
+      if (!c) return `<span class="mu" style="font-size:11px" title="No claim on this order names a carrier in its department, type or description.">—</span>`;
+      const mixed = c === CARRIER_MIXED;
+      return `<span${mixed ? ' class="b Med" title="Claims on this order name both UPS and FedEx, so it is not filed under either."' : ''}>${esc(c)}</span>` +
+        (withWhy ? (mixed ? ' <span class="mu" style="font-size:11px">both named in the claims</span>'
+          : ' <span class="mu" style="font-size:11px">from the claims</span>') : '');
+    }
 
     function visibleOrders() {
       const s = getSession();
@@ -70,18 +84,19 @@
 
         <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
           <div class="card tw"><table>
-            <tr><th>Order ID</th><th>Type</th><th>Claims</th><th>Open</th><th>Credit</th><th>Depts</th><th>First–last claim</th></tr>
+            <tr><th>Order ID</th><th>Type</th><th>Carrier</th><th>Claims</th><th>Open</th><th>Credit</th><th>Depts</th><th>First–last claim</th></tr>
             ${shown.length ? shown.map((o) => `
               <tr class="cl${o[0] === selectedOrder ? ' on' : ''}" onclick="selectedOrder='${o[0]}';render()">
                 <td><b>${o[0]}</b>${o[1] > 1 ? ` <span class="b Med">repeat ×${o[1]}</span>` : ''}</td>
                 <td>${esc(orderLabel(o))}</td>
+                <td>${carrierCell(o[9])}</td>
                 <td>${num(o[1])}</td>
                 <td>${o[3] ? `<span class="b Med">${num(o[3])}</span>` : '0'}</td>
                 <td>${usd(o[2])}</td>
                 <td>${num(o[4])}</td>
                 <td class="mu" style="font-size:11px">${esc(o[5])} → ${esc(o[6])}</td>
               </tr>`).join('')
-              : `<tr><td colspan="7" class="mu">No orders match this filter.</td></tr>`}
+              : `<tr><td colspan="8" class="mu">No orders match this filter.</td></tr>`}
           </table>
           ${orders.length > shown.length
             ? `<div class="mu" style="font-size:12px;padding:10px 14px">Showing first ${shown.length} of ${num(orders.length)} matching orders — narrow the search to see more.</div>`
@@ -92,6 +107,7 @@
           <div class="card"><h3>Order ${order[0]}</h3>
             <dl class="dl">
               <dt>Order type</dt><dd>${esc(orderLabel(order))}</dd>
+              <dt>Carrier</dt><dd>${carrierCell(order[9], true)}</dd>
               <dt>Claims raised</dt><dd>${num(order[1])}${order[1] > 1 ? ` <span class="b Med">repeat claim order</span>` : ''}</dd>
               <dt>Still open</dt><dd>${num(order[3])}</dd>
               <dt>Total credit</dt><dd>${usd(order[2])}</dd>
@@ -106,9 +122,13 @@
                 : '<span class="mu">No claim from this order is in the worked-examples set.</span>'}</dd>
             </dl>
             <p class="mu" style="font-size:11px;margin-top:12px;line-height:1.6">
-              The export contains no customer, product, quantity, price or carrier fields, so those
-              columns cannot be shown for any order. Everything above is measured from the claim rows
-              that reference this OrderID.
+              The export contains no customer, product, quantity or price fields, so those columns
+              cannot be shown for any order. Everything above is measured from the claim rows that
+              reference this OrderID. Carrier is the exception: the export has no carrier column
+              either, so it is read out of the department, claim type and description of this order's
+              claims. ${num(orders.length ? ORDERS.filter((o) => o[9]).length : 0)} of the ${num(ORDERS.length)}
+              listed orders name one, and the rest show a dash because "not stated" is not "shipped
+              in our own van".
             </p>
           </div>` : ''}
         </div>

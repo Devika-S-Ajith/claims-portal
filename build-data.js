@@ -473,6 +473,78 @@ for (const y of YEARS) {
 for (const o of OWNERS) DEPT_FACTS.all[o.id] = DEPT_FACTS.all.all.filter((d) => d[1] === o.id);
 console.log('dept fact rows:', Object.values(DEPT_FACTS).reduce((s, m) => s + m.all.length, 0));
 
+// ---------------------------------------------------------------- carriers
+// The export has no Carrier column. A carrier is named in three places that do
+// exist: ClaimDept ('UPS', 'FEDEX'), ClaimType ('Fedex/Ups Did Not Ship/Deliver
+// On Time') and the free-text description ('UPS has not found the packages').
+// It is read out of all three, most structured first.
+//
+// Two corrections the raw text needs, or the counts are wrong:
+//   - 'mock ups' / 'set ups' / 're-set ups' are printing terms in this file, not
+//     the courier. 163 claims hit that, so the UPS pattern refuses them.
+//   - A claim naming two carriers is a real case here, not a bad match: FedEx
+//     Ground shipments billed to a UPS shipper account, freight split across a
+//     truck and UPS on one order. Those are bucketed 'UPS/FedEx' rather than
+//     filed under whichever pattern ran first, so the rows partition the claims
+//     they cover instead of double counting 335 of them.
+const CARRIER_HITS = [
+  ['UPS', /\b(?<!mock )(?<!re-?set )(?<!set )(?<!top )(?<!add )(?<!pick )(?<!close )(?<!clean )(?<!follow )(?<!start )ups\b/i],
+  ['FedEx', /\bfed\s?ex\b/i]
+];
+function carrierOf(c) {
+  const fields = [c.rawDept, c.type, c.desc];
+  const hits = CARRIER_HITS
+    .map(([name, re]) => (fields.some((f) => re.test(f)) ? name : null))
+    .filter(Boolean);
+  if (!hits.length) return null;
+  return hits.length > 1 ? 'UPS/FedEx' : hits[0];
+}
+for (const c of claims) c.carrier = carrierOf(c);
+
+// The claims that a carrier can be responsible for at all: damage, loss and
+// non-delivery, plus wrong-carrier-billing. Everything else named in the text
+// is a shipping account number or a rate quote, not a carrier failure.
+const CARRIER_DAMAGE = /product damage|missing|not shipped|wrong item|shortage|did not ship|deliver on time|lost|did not deliver/i;
+
+// [name, claims, orders, open, openCredit, credit, damageClaims,
+//  medianDays, p90Days, timedCloses]
+function carrierFacts(list) {
+  const m = new Map();
+  for (const c of list) {
+    if (!c.carrier) continue;
+    if (!m.has(c.carrier)) m.set(c.carrier, { name: c.carrier, claims: 0, credit: 0, open: 0, openCredit: 0, damage: 0, orders: new Set(), spans: [] });
+    const e = m.get(c.carrier);
+    e.claims++;
+    e.credit = r2(e.credit + c.credit);
+    if (CARRIER_DAMAGE.test(c.type)) e.damage++;
+    if (c.status === 'Open') { e.open++; e.openCredit = r2(e.openCredit + c.credit); }
+    if (c.order) e.orders.add(c.order);
+    if (c.resolved && c.rdate && c.date) e.spans.push((new Date(c.rdate) - new Date(c.date)) / 86400000);
+  }
+  return [...m.values()].map((e) => {
+    e.spans.sort((a, b) => a - b);
+    const q = (f) => (e.spans.length ? r2(e.spans[Math.min(e.spans.length - 1, Math.floor(e.spans.length * f))]) : 0);
+    return [e.name, e.claims, e.orders.size, e.open, e.openCredit, e.credit, e.damage, q(0.5), q(0.9), e.spans.length];
+  }).sort((a, b) => b[1] - a[1]);
+}
+
+// Scoped exactly like DEPT_FACTS, but by re-aggregating rather than by
+// filtering rows: a department routes to one owner, whereas a carrier's claims
+// are spread across many, so "this manager's carrier book" has to be cut from
+// the claims up front or the rows would be filtered against an owner they do
+// not have.
+const CARRIER_FACTS = { all: { all: carrierFacts(claims) } };
+for (const y of YEARS) {
+  const list = claims.filter((c) => c.y === y);
+  CARRIER_FACTS[y] = { all: carrierFacts(list) };
+  for (const o of OWNERS) CARRIER_FACTS[y][o.id] = carrierFacts(list.filter((c) => ownerOf(c.dept) === o.id));
+}
+for (const o of OWNERS) CARRIER_FACTS.all[o.id] = carrierFacts(claims.filter((c) => ownerOf(c.dept) === o.id));
+
+console.log('carrier rows:', Object.values(CARRIER_FACTS).reduce((s, m) => s + m.all.length, 0),
+  '| claims carrying a carrier name:', claims.filter((c) => c.carrier).length, 'of', claims.length,
+  '| ambiguous UPS/FedEx:', claims.filter((c) => c.carrier === 'UPS/FedEx').length);
+
 // ---------------------------------------------------------------- scoped blocks
 // The main year blocks are cut by owner only, so a page cannot repoint a figure
 // at one department without re-aggregating the whole export in the browser.
@@ -539,7 +611,7 @@ console.log('departments indexed:', DEPT_INDEX.length,
 const QUEUE_SRC = claims.filter(needsAction)
   .map((c) => [c.id, c.order, c.type, c.dept, c.status, c.credit, FLAGS(c).join('~'),
     c.date, ownerOf(c.dept), c.issuer, c.desc.slice(0, 300), c.rca, c.capa, c.note.slice(0, 300),
-    c.memoNo, c.memoDate, c.memoAmt, c.rdate, c.forInv]);
+    c.memoNo, c.memoDate, c.memoAmt, c.rdate, c.forInv, c.carrier || '']);
 
 console.log('queue rows:', QUEUE_SRC.length);
 
@@ -566,6 +638,17 @@ for (const o of OWNERS) {
 const deniedRow = claims.filter((c) => c.denied && c.desc.length > 20)[0];
 if (deniedRow) pick.push(deniedRow);
 
+// The examples are what the detail page can show, so a field that only 0.05% of
+// claims carry would never appear there if left to chance. One claim naming a
+// single carrier and one naming both are forced in, so the carrier is always
+// demonstrable and both readings of the field are visible.
+for (const want of ['UPS', 'UPS/FedEx']) {
+  if (pick.some((c) => c.carrier === want)) continue;
+  const c = claims.filter((x) => x.carrier === want && x.desc.length > 40 && !pick.includes(x))
+    .sort((a, b) => b.credit - a.credit)[0];
+  if (c) pick.push(c);
+}
+
 const EXAMPLES = pick.map((c) => ({
   id: c.id,
   or: c.order,
@@ -587,6 +670,7 @@ const EXAMPLES = pick.map((c) => ({
   memo: c.memoNo,
   memoAmt: c.memoAmt,
   otype: c.otype,
+  ca: c.carrier || null,
   ai: c.rca || c.capa || c.sol ? 'acc' : 'none'
 }));
 
@@ -612,28 +696,44 @@ const AI_TYPES = ALL.types.slice(0, 12).map((t) => t[0]);
 // ---------------------------------------------------------------- orders
 // The export carries OrderID only - no product, quantity or unit price, so an
 // "order" here is a real aggregate of the claims raised against it.
+// An order inherits its carrier from the claims raised against it, the same way
+// it inherits its departments. The set is collapsed rather than joined: an order
+// with one UPS claim and one claim naming both UPS and FedEx is a UPS order that
+// also has an ambiguous claim on it, and joining the set would print the
+// nonsense carrier "UPS/UPS/FedEx". Ambiguous wins, because it is the wider
+// truth - the order cannot be filed under a single courier. An order whose
+// claims name no carrier stays blank, since the export cannot be made to say
+// more than that.
+const orderCarrier = (set) => {
+  if (!set.size) return '';
+  if (set.has('UPS/FedEx')) return 'UPS/FedEx';
+  return [...set].sort().join('/');
+};
+
 const orderAgg = new Map();
 for (const c of claims) {
   if (!c.order) continue;
-  if (!orderAgg.has(c.order)) orderAgg.set(c.order, { id: c.order, claims: 0, credit: 0, depts: new Set(), owners: new Set(), types: new Set(), open: 0, first: c.date, last: c.date, otype: c.otype });
+  if (!orderAgg.has(c.order)) orderAgg.set(c.order, { id: c.order, claims: 0, credit: 0, depts: new Set(), owners: new Set(), types: new Set(), carriers: new Set(), open: 0, first: c.date, last: c.date, otype: c.otype });
   const e = orderAgg.get(c.order);
   e.claims++; e.credit = r2(e.credit + c.credit);
   e.depts.add(c.dept);
   e.owners.add(ownerOf(c.dept));
   e.types.add(c.type);
+  if (c.carrier) e.carriers.add(c.carrier);
   if (c.status === 'Open') e.open++;
   if (c.date < e.first) e.first = c.date;
   if (c.date > e.last) e.last = c.date;
 }
-// [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners]
+// [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners, carrier]
 const ORDER_IDS = [...orderAgg.values()]
   .filter((o) => o.claims > 1 || o.open > 0)
   .sort((a, b) => b.claims - a.claims || b.credit - a.credit)
   .slice(0, 400)
   .map((o) => [o.id, o.claims, o.credit, o.open, o.depts.size, o.first, o.last, o.otype,
-    [...o.owners].sort().join('~')]);
+    [...o.owners].sort().join('~'), orderCarrier(o.carriers)]);
 console.log('order aggregates embedded:', ORDER_IDS.length, 'of', orderAgg.size,
-  '| multi-owner:', ORDER_IDS.filter((o) => o[8].includes('~')).length);
+  '| multi-owner:', ORDER_IDS.filter((o) => o[8].includes('~')).length,
+  '| with a carrier:', ORDER_IDS.filter((o) => o[9]).length);
 
 // ---------------------------------------------------------------- data quality
 const DQ = (() => {
@@ -718,7 +818,7 @@ out.push('');
 out.push('// ---- every claim that still needs work ----');
 out.push('// [id, order, type, dept, status, credit, flags, raised, owner, raisedBy,');
 out.push('//  description, rootCause, correctiveAction, note, memoNo, memoDate, memoAmount,');
-out.push('//  resolvedDate, creditForInvoice]');
+out.push('//  resolvedDate, creditForInvoice, carrier]');
 out.push('// Built inside an IIFE so the raw tuple array is released after mapping.');
 out.push('const OWNER_QUEUE = (() => {');
 out.push('  const raw = ' + J(QUEUE_SRC) + ';');
@@ -726,7 +826,7 @@ out.push('  return raw.map((a) => ({');
 out.push('    id: a[0], o: a[1], ty: a[2], de: a[3], ar: areaOfDept(a[3]), st: a[4], am: a[5],');
 out.push('    reasons: a[6] ? a[6].split("~") : [], reason: a[6] ? a[6].split("~")[0] : "",');
 out.push('    date: a[7], own: a[8], iss: a[9], ds: a[10], rca: a[11], capa: a[12], note: a[13],');
-out.push('    memo: a[14], memoDate: a[15], memoAmt: a[16], rdate: a[17], forInv: a[18]');
+out.push('    memo: a[14], memoDate: a[15], memoAmt: a[16], rdate: a[17], forInv: a[18], ca: a[19] || ""');
 out.push('  }));');
 out.push('})();');
 out.push('');
@@ -759,6 +859,7 @@ out.push('// Per-department rates, so cost and open-rate can be compared per tea
 out.push('// Keyed by year (or "all"), then by the owner the department routes to.');
 out.push('// [dept, owner, area, claims, orders, open, credit, openCredit, creditIssued, repeatOrders, noCredit]');
 out.push('const DEPT_FACTS = ' + J(DEPT_FACTS) + ';');
+out.push('const CARRIER_FACTS = ' + J(CARRIER_FACTS) + ';');
 out.push('');
 out.push('// ---- warehouses ----');
 out.push('// The export has no warehouse column. add-warehouse.js appends one (A-F)');

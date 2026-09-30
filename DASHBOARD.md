@@ -144,7 +144,7 @@ in use on `departments.html`, which still renders its own four cards in the olde
 Every count here is the exact number of rows the card's filter opens, so the feed and the table
 below cannot disagree. Only work that is **still outstanding** earns a card. Whole‑year totals
 used to sit in this group too, but they carry no action and have no filter to open, so they are
-absent here and appear once each in the **Three Numbers That Matter** tiles.
+absent here and appear once each in the **stat line** under the page title.
 
 | Card | Priority | Big number is | Counted from | Context line | Link filters by |
 |---|---|---|---|---|---|
@@ -169,20 +169,44 @@ any card filters it.
 
 The panel is scoped to the selected year and to the signed‑in user's caseload.
 
-## 2. The Three Numbers That Matter
+## 2. The Stat Line
 
-| Tile | Value | Formula | 2026 (admin) |
-|---|---|---|---|
-| Claims raised | count | all claims in the selected year and scope | 4,254 |
-| Credit given | $ | `sum(CreditAmount)` | $565,826.03 |
-| Still open | count | `ClaimResolved = 0` | 751 = 17.7% of intake |
+Three numbers in a single horizontal row, **directly under the page title and year picker** and
+above the Needs Attention feed. It is the first content block on the page.
 
-The ▲ / ▼ chip compares **the same months** in the previous year (see §3).
+| Number | Value | Formula | Comparison line | 2026 (admin) |
+|---|---|---|---|---|
+| Claims raised | count | all claims in the selected year and scope | `↑ 9.0% from last year` | 4,254 |
+| Credit given | $ | `sum(CreditAmount)` | `↑ 33.0% from last year` | $566K |
+| Still open | count | `ClaimResolved = 0` | `17.7% of claims raised this year` | 751 |
 
-**Credit per claim and max single claim were removed.** The average is already the value line
-on the Total claims card, and the largest single credit is already visible in the credit
-distribution chart further down. Carrying them here as well was three numbers the reader had
-to reconcile for no extra information.
+**No cards, no pills, no colour.** Each number is a 13px muted label, a 32px medium‑weight
+figure, and one plain sentence beneath it. The only thing separating the numbers is a 0.5px
+vertical rule; there is no fill, no border and no shadow on the row or on any number. Under
+700px the row becomes a single column and the rules turn horizontal — a 3‑up row with vertical
+rules has no useful compressed form.
+
+**The direction glyph is text, not a verdict.** `↑` / `↓` sit inline ahead of the sentence and
+nothing is coloured, because "up" is not one thing across these three lines: more claims raised
+is neutral, more credit given is bad news, and fewer open claims is good. The previous version
+painted these as red/green pills, which quietly asserted a judgement the data does not support.
+`delta()` now returns only `{ dir, mag }` and the line builds the sentence.
+
+**Claims and credit compare the same months in both years** (see §3) — nine months of 2026
+against nine months of 2025, not against all twelve. **Still open is not compared at all.** The
+data exposes `unresolved` as a full‑year block with no monthly series, so a like‑for‑like
+comparison is not available; the line states the share of intake instead of printing a number
+that would look authoritative and be wrong. Where there is no prior year (2010, the first in the
+export) the line reads *No comparable prior period*.
+
+**The old card row is gone**, and with it the *The Three Numbers That Matter* heading. The
+`.kpi` card family still exists in `style.css` because `orders.html` and `admin-dashboard.html`
+both use it.
+
+**Credit per claim and max single claim were removed earlier.** The average is on the *Open
+claims* card in the feed, and the largest single credit is already visible in the credit
+distribution chart further down. Carrying them here as well was three numbers the reader had to
+reconcile for no extra information.
 
 ## 3. This Year vs Last Year
 
@@ -214,7 +238,12 @@ It was removed — it duplicated this chart without adding anything.
 |---|---|---|
 | Claims by team area | claims per business area, donut, plus a per‑area breakdown with share bar and a callout on the dominant area | — |
 | Top claim types | claims per `ClaimType`, top 10 with a *+N* expander | Count / Credit |
-| Credit by department | `sum(CreditAmount)` per `ClaimDept`, top 10 | Count / Credit |
+
+**The donut's centre is the resolved share, not the total.** It used to print the year's total
+claim count, which the stat line four rows above already prints — the same number twice on one
+screen. It now prints `resolved / total` as a percentage, labelled `RESOLVED`, and the two totals
+underneath it are the resolved count and the number of team areas. The grand total is printed once
+per screen, in the stat line.
 
 **The team‑area card carries a breakdown, not just a legend.** It sits in a three‑column grid
 row beside two ten‑row bar lists, so a bare donut plus a three‑line legend left most of the card
@@ -223,6 +252,11 @@ per‑area breakdown (name, count, share %, share bar) in the middle, and a foot
 naming the area carrying the most claims. The breakdown list is `flex:1` with
 `align-content:space-evenly`, so when a year has only two or three areas the extra height is
 shared out between the rows rather than pooling underneath them.
+
+**AI insight cards link to the claim-type list.** A card that names a claim type carries a
+*View in table ↓* control. It expands the list if the type is below the top 10, scrolls to the
+row, and flashes it. A card whose type is not in the year's list at all shows no control, so
+there is no dead link.
 
 Departments are rolled into six **team areas** so the mix is readable:
 
@@ -249,7 +283,7 @@ wonder whether the two copies disagree. Removed from the department page:
 | Month by month — claims and credit vs last year | This Year vs Last Year |
 | What this year cost — credit given vs memo sent, share of company | Where the Money Goes |
 | What the claims are — claim-type donut | Top claim types |
-| All departments — full league table with credit/median columns | Credit by department, What Is Still Going Wrong |
+| All departments — full league table with credit/median columns | Department Comparison, and the ranked credit bars in Where the Money Goes |
 
 The removed league table also duplicated the page's own **All departments side by side**, which
 is kept because it is the comparison the page exists to make.
@@ -305,12 +339,121 @@ The six cards are ranked by claims, and the largest is labelled **Most defects**
 because that is what the export supports — a share of claims, not a rate against goods handled.
 Each card also carries that site's top fault by credit, its open share, and a meter.
 
-## 5. Where the Money Goes
+## 5. Department Comparison
+
+One sortable table, `Department | Count | Credit | <rate>`, replacing **three** stacked charts on
+the same department axis. The three views were count‑by‑department, credit‑by‑department and a
+rate chart; they were three ways of reading three columns of the same rows, stacked one under
+another, so comparing a department's volume against its money against its rate meant holding
+three lists at once. The row is now the unit of comparison.
+
+| Column | Source |
+|---|---|
+| Department | `DEPT_FACTS[i][0]`, the export's nine, in reporting order |
+| Count | `d[3]`, claims raised |
+| Credit | `d[6]`, `sum(CreditAmount)` |
+| Rate | the toggle below |
+
+Every column sorts. Clicking the column already sorted on flips the direction; a new column starts
+in the useful direction (names A‑Z, measures largest first). The active column is the only one
+reporting `aria-sort`, so a screen reader is told which order it is reading.
+
+| Rate toggle | Numerator | Denominator | Reads as |
+|---|---|---|---|
+| Still open | claims with `ClaimResolved = 0` | claims raised | share of the year still open |
+| Repeat orders | orders that raised more than one claim | orders touched | how often a fix did not hold |
+| Cost nothing | claims with `CreditAmount = 0` | claims raised | claims closed with no cost |
+
+**A thin base is flagged, not hidden.** The rate chart used to drop any department with a
+denominator under 10, because 1 of 1 is 100% and reads as a crisis. A table cannot drop rows
+without hiding departments, so instead the figure goes muted, the bar goes flat, and the row's
+tooltip names the base it is off. The rate turns red when it is above the average across the
+current scope. Clicking a row filters the queue to that department.
+
+## 6. Carrier Scorecard
+
+The same table shape, for carriers, read from `CARRIER_FACTS`.
+
+| Column | Source |
+|---|---|
+| Carrier | `UPS`, `FedEx` or `UPS/FedEx` — derived, see below |
+| Claims | claims naming that carrier |
+| Open | still open, with the open rate beneath it |
+| Damage or loss | claims whose `ClaimType` is damage, missing, not shipped, wrong item, shortage or non‑delivery |
+| Credit | `sum(CreditAmount)` |
+| Slowest 10% closed in | `p90Days`, with the median beneath it |
+
+### The export has no Carrier column
+
+There is no carrier field in the 58 columns of `Claim_202609281521.csv`. A carrier is named in
+three fields that do exist, and `build-data.js` reads all three, most structured first:
+
+| Field | Example | Claims |
+|---|---|---|
+| `ClaimDept` | `UPS`, `FEDEX` | 11 |
+| `ClaimType` | `Fedex/Ups Did Not Ship/Deliver On Time` | 282 |
+| `ClaimDescription` | `UPS has not found the packages and has denied the claim` | 1,347 |
+
+That leaves **1,640 of 31,521 claims (5.2%)** naming a carrier. Adding "no carrier named" as a
+row would be three‑quarters empty, so the scorecard covers only the 1,640 and the caption prints
+the share, so the reader knows the base.
+
+Two corrections the raw text needs, or the counts are wrong:
+
+- **`mock ups` / `set ups` / `re‑set ups` are printing terms in this file, not the courier.** 163
+  claims hit that. The UPS pattern refuses them with a negative lookbehind, which is also why the
+  per‑field table above sums to 1,640 and not to the raw grep count: one claim can name a carrier
+  in more than one field and is counted once.
+- **A claim naming two carriers is a real case, not a bad match.** FedEx Ground shipments billed
+  to a UPS shipper account, and freight split across a truck and UPS on a single order. Those 353
+  claims are a row of their own, `UPS/FedEx`, rather than being filed under whichever pattern ran
+  first — which keeps the rows *partitioning* the claims they cover instead of double counting
+  them. Filing them under UPS would have reported 1,276 UPS claims against 364 FedEx, and the
+  353 shared ones would be counted in both.
+
+### What the scorecard deliberately does not have
+
+**No claim rate.** The requested metric was claims as a % of that carrier's total order volume.
+The export contains no order list — it holds only orders that *raised a claim*, 25,485 distinct
+`OrderID`s. The denominator would be the numerator, so every carrier would read ~100%. The
+substitute printed instead is the **open claim rate** (open ÷ claims), which is a real
+measurement of the same population, and it is shown beneath the open count.
+
+**No modelled split.** Nothing here is assigned, sampled or scaled. Every figure is counted out of
+the CSV. Compare the warehouse model in [§4.1](#41-departments-and-warehouses), which is
+labelled `modelled` on the page.
+
+### Where a carrier surfaces
+
+| Page | Where |
+|---|---|
+| `dashboard.html` | this scorecard, next to Department Comparison, scoped by year and owner |
+| `orders.html` | a `Carrier` column, and a `Carrier` row in the order detail panel |
+| `claim-detail.html` | a `Carrier` row in Related Order, whether or not the order is in the embedded set |
+
+An order with no carrier shows a dash titled *No claim on this order names a carrier in its
+department, type or description* — a blank means **not stated**, not *shipped in our own van*, and
+is never guessed. Of the 400 embedded orders, 48 name a carrier. Two more of the ten worked
+examples are forced to name one, so the field is always demonstrable on the detail page rather
+than depending on chance.
+
+## 7. Where the Money Goes
 
 | Chart | Measure |
 |---|---|
-| Credit given vs memo sent | Two labelled bars per department: `sum(CreditAmount)` and `sum(abs(CreditMemoAmount))`. The badge in the header is the gap — credit promised that never became a credit memo, i.e. money not yet recovered. |
-| How big are the claims | Claims per credit band — exactly three: `<$50`, `$50‑$500`, `>$500`. Bar height = claims, label = credit in the band. **The three bands sum exactly to `credited` and to `credit`**, so the chart always reconciles with the Credit given tile above it. |
+| Credit by department | `sum(CreditAmount)` per department, top 8, with an Amount / Percent toggle over the same bars |
+| How big are the claims | Claims per credit band — exactly three: `<$50`, `$50‑$500`, `>$500`. Bar height = claims, label = credit in the band. **The three bands sum exactly to `credited` and to `credit`**, so the chart always reconciles with the Credit given figure in the stat line at the top of the page. |
+
+**One credit chart, not two.** The old pair chart drew `sum(CreditAmount)` and
+`sum(abs(CreditMemoAmount))` as two bars per department, read off the same `DEPT_FACTS` credit
+column, and a separate "Credit by department" chart showed the same credit figure as a ranked bar
+list. Three charts, one underlying number. Now one ranked bar list with an Amount / Percent
+toggle, and the memo gap survives as a single figure in the card footer — credit promised and
+never converted into a credit memo is real information, it just does not need a second set of
+bars.
+
+**The footer states the memo gap**, or says every credit has a matching memo. That is the one
+figure from the old pair chart that is not derivable from the bar list.
 
 **Why the bands are predicates, not ranges.** 37 claims in the file carry a **negative**
 `CreditAmount` — credit reversals, totalling −$7,632 (3 of them, −$177.59, in 2026). A
@@ -323,22 +466,7 @@ A five‑band split (`$50‑250`, `$250‑1k`, `$1k‑5k`, `$5k‑25k`, `$25k+`)
 revision. It answered no question anyone was asking: it split the small claims four ways
 while the money sits in a single band above $500.
 
-## 6. What Is Still Going Wrong
-
-One rate per department, top 10, with a three‑way toggle. A rate is what a count‑only report
-cannot show, because counts grow with volume and rates do not.
-
-| Toggle | Numerator | Denominator | Reads as |
-|---|---|---|---|
-| Still open | claims with `ClaimResolved = 0` | claims raised | share of the year that is still open |
-| Repeat orders | orders that raised more than one claim | orders touched | how often a fix did not hold |
-| Cost nothing | claims with `CreditAmount = 0` | claims raised | claims that were closed with no cost |
-
-Departments with fewer than 10 claims in the denominator are hidden — the rate is not
-meaningful at that size. A bar turns red when it is above the average across the current
-scope. Clicking a row filters the table to that department.
-
-## 7. Open Claims
+## 8. Open Claims
 
 Every claim in the selected year that still needs work. Resolved claims are deliberately
 excluded from the whole dashboard.
@@ -351,6 +479,18 @@ four times within one screen. Now:
 - **Resting state** — no banner at all. The toolbar's row counter is hidden too.
 - **Search or a card filter active** — the banner shows only the active filter and the button
   that clears it, and the toolbar shows `N of 751 shown`.
+
+**The card carries a caption, because its row count is not the stat line's number.** The two are
+different populations and the page now says so instead of leaving the reader to find the
+discrepancy:
+
+> Showing all 845 open cases in 2026. The "Still open" figure at the top of the page (751) counts
+> only claims not marked resolved, so this table is 94 wider — it also holds denied, cancelled and
+> never‑finished entries.
+
+The gap is the flags below minus the unresolved flag: 751 unresolved plus the denied, cancelled
+and entry‑not‑finished claims. It is computed, not typed, and it reads 0 when a scope happens to
+have no such claims.
 
 A claim is in the queue when **any** of these is true — flags therefore overlap, and one
 claim can appear under more than one group:
@@ -418,7 +558,7 @@ Grouping (collapsed, loaded on first open): **Flag**, **Department**, **Team are
 | `area` | `[[name, count, credit], …]` by team area — all 6 |
 | `types` | `[[name, count, credit], …]` by claim type, top 25 per year |
 | `dept` | `[[name, count, credit], …]` by department, top 20 per year |
-| `dist` | `[[band, count, credit], …]` by credit band — three bands, see the note in §5 |
+| `dist` | `[[band, count, credit], …]` by credit band — three bands, see the note in §7 |
 | `months` | 12 × `[claimCount, credit]` for Jan…Dec |
 | `typeMonths` | 12 × `[claimType, 12 × monthlyClaimCount]` for the top 12 claim types, largest first. This is what the AI cards read, because a yearly total cannot distinguish a standing fault from a one-off spike. |
 
@@ -444,6 +584,28 @@ slice appear — 46 of 46 for `all`, 23 for 2026.
 | 9 | `repeatOrders` | Orders that raised more than one claim |
 | 10 | `noCredit` | Claims with a zero credit |
 
+### `CARRIER_FACTS[year|all][all|ownerId]` — per carrier
+
+Same shape of key as `DEPT_FACTS`, but the owner slice is built by **re‑aggregating the owner's
+claims**, not by filtering rows: a department routes to exactly one owner, whereas a carrier's
+claims are spread across all of them, so "this manager's carrier book" has to be cut from the
+claims up front. Each entry is a positional array; only carriers named in the slice appear.
+
+| # | Field | Meaning |
+|---|---|---|
+| 0 | `name` | `UPS`, `FedEx` or `UPS/FedEx` |
+| 1 | `claims` | Claims naming this carrier |
+| 2 | `orders` | Distinct orders touched |
+| 3 | `open` | Claims still open |
+| 4 | `openCredit` | Credit on the still‑open claims |
+| 5 | `credit` | `sum(CreditAmount)` |
+| 6 | `damage` | Claims whose `ClaimType` is damage, missing, not shipped, wrong item, shortage or non‑delivery |
+| 7 | `medianDays` | Median days to close |
+| 8 | `p90Days` | 90th percentile days to close |
+| 9 | `timed` | How many of these claims had both dates, so the percentiles are readable as a base |
+
+Derivation and the 1,640 / 353 counts are in [§6](#6-carrier-scorecard).
+
 ### `OWNER_QUEUE` — every claim that still needs work (all years, 10,015 rows)
 
 | Field | Meaning |
@@ -457,6 +619,7 @@ slice appear — 46 of 46 for `all`, 23 for 2026.
 | `memo` `memoDate` `memoAmt` | Credit memo details |
 | `rdate` | `ClaimResolvedDate` |
 | `forInv` | `CreditForInvoiceNo` |
+| `ca` | Carrier name or `""` — see §6. Lets a carrier row in the scorecard filter the queue with the same `jump('ca', …)` the department and claim-type rows use. |
 
 The dashboard filters this queue to the selected year, which is why every count on the page
 matches the table.
@@ -470,8 +633,9 @@ matches the table.
 | `AREA_OF_DEPT` | Department → team area map |
 | `OWNER_MATRIX` | Per owner: `total open unresolved unfinished credit queue depts` |
 | `DEPT_OWNERS` | Per department: `dept owner n credit queue` |
-| `ORDERS` | The top 400 order aggregates — every order with more than one claim or an open claim, sorted by claims then credit: `[id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners]` |
-| `CLAIMS` / `CLAIM_FINANCIALS` | 13 real worked examples (mix of resolved, open, denied, with and without a memo) used by `claim-detail.html`. `CLAIM_FINANCIALS` is an object keyed by claim id holding the memo and invoice fields |
+| `ORDERS` | The top 400 order aggregates — every order with more than one claim or an open claim, sorted by claims then credit: `[id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners, carrier]`. The carrier is the derived `""` / `UPS` / `FedEx` / `UPS/FedEx` of §6, collapsed so an order holding both a UPS claim and a both-named claim reports `UPS/FedEx` rather than `UPS/UPS/FedEx` |
+| `CARRIER_FACTS` | Per carrier per year and owner — see [above](#carrier_factsyearallallownerid--per-carrier) |
+| `CLAIMS` / `CLAIM_FINANCIALS` | 12 real worked examples (mix of resolved, open, denied, with and without a memo, and at least one naming each of `UPS` and `UPS/FedEx`) used by `claim-detail.html`. `CLAIM_FINANCIALS` is an object keyed by claim id holding the memo and invoice fields |
 | `AI_SUGGESTIONS` | Suggested‑cause prompts keyed by the 12 most common claim types, plus a `default` fallback |
 | `SOURCE_FILE` `EXPORTED_AT` `YEARS` `LATEST_YEAR` | Provenance |
 
@@ -507,11 +671,12 @@ Other Scheduling` (all zero on every row), `Split` (empty), `SyncFlag` (always `
 | No owning department | 7,427 (23.8%) | Nobody is accountable; 99.4% of these are still open |
 | Root cause almost never filled | 3 of 31,235 | Cause analysis is impossible. The fields meant to carry it are empty: `RootCauseAnalysis` 3 values, `CorrectiveAction` 31, `PreventiveAction` 14, `ProposedSolution` 1 |
 | No assignee column | — | Ownership is modelled, see below |
+| No carrier column | 29,881 (94.8%) of claims name no carrier | A carrier is **derived** from `ClaimDept`, `ClaimType` and `ClaimDescription`, not read from a field — see §6. 1,640 claims name one, 353 of those name two. The scorecard covers only the 1,640 and says so, and a blank on the order pages means "not stated", never a guess |
 | No warehouse column | all 31,521 | `add-warehouse.js` appends a mock A–F `Warehouse` column (where the product sat when the fault was found) so the department page can rank sites. Mocked, not real: see §4.1 |
 | Department columns empty | all 31,521 | `Art`, `Production`, `OrderChange`, `Shipping`, `Invoicing`, `Pricing`, `Overseas`, `CustomerService`, `Quoting` are the literal value `0` on every row. They are placeholders. The only populated department field is `ClaimDept`, 47 spellings, collapsed to the nine by `DEPT_MAP` |
 | No `Overseas` claims | 0 rows | Listed in the picker as required, and shown with an empty state rather than dropped |
 | Currency blank | 31,235 | No conversion is possible; every figure is as‑exported |
-| Near‑duplicate departments | 1,351 claims | `Sample Dept`/`Sample Dep.`, `System`/`System Error`, the four `Drinkware*`, `Courier`/`UPS`/`FEDEX` |
+| Near‑duplicate departments | 1,351 claims | `Sample Dept`/`Sample Dep.`, `System`/`System Error`, the four `Drinkware*`, `Courier`/`UPS`/`FEDEX`. The last three are the carrier signal: `ClaimDept` is one of the three places a carrier can be read from |
 | Placeholder department | 15 claims | `Claim Dept` is not a real team |
 | Resolved with no date | 4,588 | Resolution speed is measured on the remainder only |
 
