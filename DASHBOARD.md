@@ -51,7 +51,9 @@ The trigger shows the selected year and a caret; the menu lists all 17 years in 
 newest first, with the current one marked `aria-selected="true"` and labelled *current*.
 Choosing one repaints every figure on the page — the year appears nowhere in the `h1`, which
 is always **Claims Dashboard**, so switching years does not retitle the page. The year is
-stated in the subtitle line instead (`Jan - Sep 2026 · 4,254 claims · $566K`).
+stated in the subtitle line instead (`Jan - Sep 2026`). The subtitle carries the time frame and
+nothing else — the claim and credit counts live in the stat line below it, which is where the
+same-year comparison can be read against them.
 
 Both dropdowns share one reveal rule, `.nav-dd.open .dd-menu, .dropdown.open .dd-menu`.
 Scoping that rule to `.nav-dd` alone is what left the year picker stuck shut while its
@@ -97,15 +99,14 @@ ties inside a tier. The source is a label, never a sort key. 2026, admin view, r
 | # | Priority | Source | Card | n | Action |
 |---|---|---|---|---|---|
 | 1 | Do First | AI Insight | Recurring issue | 845 | Investigate pattern |
-| 2 | Do First | Metric | Open claims | 751 | Open queue |
-| 3 | Do First | Metric | Awaiting action | 819 | Review entries |
-| 4 | Do Next | AI Insight | High‑value impact | 377 | Investigate pattern |
-| 5 | Do Next | AI Insight | Potential CAPA | 701 | Start CAPA review |
-| 6 | Do Next | Metric | Repeat‑claim orders | 404 | Review orders |
-| 7 | Review | AI Insight | Emerging trend | 55 | Investigate pattern |
+| 2 | Do First | Metric | Awaiting action | 819 | Review entries |
+| 3 | Do Next | AI Insight | High‑value impact | 377 | Investigate pattern |
+| 4 | Do Next | AI Insight | Potential CAPA | 701 | Start CAPA review |
+| 5 | Do Next | Metric | Repeat‑claim orders | 404 | Review orders |
+| 6 | Review | AI Insight | Emerging trend | 55 | Investigate pattern |
 
 Note the interleave: Do First is AI‑then‑metric, Do Next is AI‑then‑metric, Review is AI. If the
-feed were still grouped by origin, rows 1–4 would all be AI cards.
+feed were still grouped by origin, rows 1–3 would all be AI cards.
 
 ### AI Insight cards
 
@@ -148,9 +149,13 @@ absent here and appear once each in the **stat line** under the page title.
 
 | Card | Priority | Big number is | Counted from | Context line | Link filters by |
 |---|---|---|---|---|---|
-| **Open claims** | Do First | still unresolved | `ClaimResolved = 0` | credit on them · % of intake | flag `Unresolved` |
 | **Awaiting action** | Do First | entry not finished | `ClaimEntryFinished ≠ 1` | % of intake · entry not marked finished | flag `Entry not finished` |
 | **Repeat‑claim orders** | Do Next | claims on orders that raised more than one | `repeatClaims` | how many orders · credit on them | flag `Repeat‑claim order` |
+
+**There is no "Open claims" card.** It was removed: the same figure is already stated as
+**Still open** in the stat line directly above, so the feed card repeated a number the reader
+had just read and gave it a second, more urgent-looking home. The open‑claim queue is still on
+the page, further down, and every card here still links into it.
 
 **There is no "Under investigation" card, because this data has no such state.** The
 `ClaimStatus` column is a numeric code (1, 2, 3, 4) populated on only 145 of 31,235 rows, and
@@ -162,7 +167,7 @@ literally an entry someone has not finished.
 **The two card kinds count different things, even though they share one queue.** Metric cards
 are volume and status for the year, restricted to what is still open. The AI cards count *all*
 claims of a type in the year — including closed ones — so Recurring issue's 845 is larger than
-Open claims' 751 even though both are tagged Do First. That is why the source tag is on the
+Awaiting action's 819 even though both are tagged Do First. That is why the source tag is on the
 card: the number alone cannot tell you whether you are looking at the open queue or at the
 whole year. The table at the bottom is the ground truth for anything still open, and clicking
 any card filters it.
@@ -519,6 +524,14 @@ claim can appear under more than one group:
 Grouping (collapsed, loaded on first open): **Flag**, **Department**, **Team area**,
 **Claim type**, **Status**. Long tails collapse into an "Other" group; long lists paginate at
 200 rows with a *show all* control.
+
+**A card filter overrides the grouping, and the dropdown is disabled while it does.** A card
+opens exactly one group — the one whose key equals the active filter — so the grouping has to
+be the axis the filter is on: an AI card filters by claim type, a metric card by flag. Left on
+the reader's own axis, the filter's key is in no bucket, `groupedTable` opens nothing, and the
+jump scrolls down to a table of collapsed headers with no rows under them. The dropdown shows
+the grouping actually in force and says *following the filter above*; **Clear** restores the
+choice it replaced.
 
 ---
 

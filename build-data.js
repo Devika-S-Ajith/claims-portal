@@ -473,6 +473,37 @@ for (const y of YEARS) {
 for (const o of OWNERS) DEPT_FACTS.all[o.id] = DEPT_FACTS.all.all.filter((d) => d[1] === o.id);
 console.log('dept fact rows:', Object.values(DEPT_FACTS).reduce((s, m) => s + m.all.length, 0));
 
+// ---------------------------------------------------------------- warehouse share
+// The warehouse the dashboard pie needs, scoped exactly like DEPT_FACTS: keyed by
+// year, then by the owner the claim's department routes to, so a manager's pie
+// adds up to the same claims as the rest of the page instead of to the company.
+//
+// Re-aggregated from the claims rather than filtered, because one warehouse
+// draws claims from every department and therefore from every owner.
+// [warehouse, claims, credit] - one row per site, ranked by claims, and every
+// site in WAREHOUSES is listed even with no claims so the pie keeps a stable
+// six slices and an empty site is a visible zero rather than a missing wedge.
+function whFacts(list) {
+  const m = new Map(WAREHOUSES.map(([w]) => [w, { claims: 0, credit: 0 }]));
+  for (const c of list) {
+    if (!m.has(c.wh)) m.set(c.wh, { claims: 0, credit: 0 });
+    const e = m.get(c.wh);
+    e.claims++;
+    e.credit = r2(e.credit + c.credit);
+  }
+  return [...m.entries()]
+    .map(([w, e]) => [w, e.claims, e.credit])
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+const WH_FACTS = { all: { all: whFacts(claims) } };
+for (const y of YEARS) {
+  const list = claims.filter((c) => c.y === y);
+  WH_FACTS[y] = { all: whFacts(list) };
+  for (const o of OWNERS) WH_FACTS[y][o.id] = whFacts(list.filter((c) => ownerOf(c.dept) === o.id));
+}
+for (const o of OWNERS) WH_FACTS.all[o.id] = whFacts(claims.filter((c) => ownerOf(c.dept) === o.id));
+console.log('warehouse rows:', Object.values(WH_FACTS).reduce((s, m) => s + m.all.length, 0));
+
 // ---------------------------------------------------------------- carriers
 // The export has no Carrier column. A carrier is named in three places that do
 // exist: ClaimDept ('UPS', 'FEDEX'), ClaimType ('Fedex/Ups Did Not Ship/Deliver
@@ -860,6 +891,12 @@ out.push('// Keyed by year (or "all"), then by the owner the department routes t
 out.push('// [dept, owner, area, claims, orders, open, credit, openCredit, creditIssued, repeatOrders, noCredit]');
 out.push('const DEPT_FACTS = ' + J(DEPT_FACTS) + ';');
 out.push('const CARRIER_FACTS = ' + J(CARRIER_FACTS) + ';');
+out.push('');
+// Claims per warehouse, for the dashboard\'s warehouse pie. Scoped like
+// DEPT_FACTS, so the pie is cut from the same claims as the rest of the page.
+// [warehouse, claims, credit] - ranked by claims, one row per site in
+// WAREHOUSES whether or not it had a claim that year.
+out.push('const WH_FACTS = ' + J(WH_FACTS) + ';');
 out.push('');
 out.push('// ---- warehouses ----');
 out.push('// The export has no warehouse column. add-warehouse.js appends one (A-F)');

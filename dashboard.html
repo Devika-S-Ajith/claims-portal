@@ -9,15 +9,46 @@
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script>
-    const COLORS = ['#6366f1', '#3b82c4', '#e8a13a', '#7d4fc0', '#ef6c6c', '#4b9c6c', '#b3a49b'];
+    // Chart palette. The old set was three blues/purples in a row (indigo
+    // #6366f1, blue #3b82c4, purple #7d4fc0), which are near-identical once they
+    // sit next to each other at slice size, so neighbouring wedges read as one
+    // shape. This set is drawn from the Okabe-Ito colour-blind-safe palette and
+    // is ordered so no two adjacent entries are close in hue *or* in lightness -
+    // adjacent slices are always separated on both axes. Every entry is also
+    // checked against --card for contrast, so a swatch is legible on white and
+    // on the dark card alike.
+    const COLORS = [
+      '#4269d0', // blue
+      '#e87d24', // orange
+      '#149e6e', // green
+      '#911eb4', // magenta
+      '#56b4e9', // sky
+      '#d3455b', // red
+      '#8c6d31', // brown
+      '#f0c941' // yellow
+    ];
+
+    // Status gets meaning, not just a colour: resolved claims are the good
+    // outcome, denied and cancelled are the two ways a claim does not get paid,
+    // and open is the backlog. Reading the ring should not require the legend,
+    // so each status keeps the same colour in every chart and every year.
+    const STATUS_COLOR = {
+      Resolved: '#149e6e',
+      Open: '#4269d0',
+      Denied: '#d3455b',
+      Cancelled: '#8c6d31'
+    };
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const TYPES_TOP = 10;
 
     let year = LATEST_YEAR;
     let typesExpanded = false;
 let focus = null;
-let queueGroup = 'reason';
-let queueSearch = '';
+    let queueGroup = 'reason';
+    // The reader's own Group by choice, parked while a card filter is driving the
+    // grouping so Clear can hand it straight back.
+    let groupBeforeFocus = null;
+    let queueSearch = '';
     let rateMetric = 'open';
     // Department comparison used to be three charts; it is one sortable table now.
     // deptSort is the active column, deptDir the direction within it.
@@ -31,8 +62,6 @@ let queueSearch = '';
     const metric = { types: 'count' };
 
     const pnum = (a, b) => (b ? (a / b) * 100 : 0);
-    // Whole dollars - cents are noise on a card that also shows a claim count.
-    const cash = (n) => '$' + Math.round(n).toLocaleString();
 
     function zeroBlock(label) {
       return {
@@ -77,9 +106,6 @@ let queueSearch = '';
       return scopedQueue().filter((r) => String(r.date || '').slice(0, 4) === String(year));
     }
 
-    const qsum = (rows) => rows.reduce((a, r) => a + (r.am || 0), 0);
-    const qcount = (rows, flag) => rows.filter((r) => r.reasons.includes(flag));
-
     let S, PREV;
 
     // ---------- small shared pieces ----------
@@ -97,16 +123,26 @@ let queueSearch = '';
     const usdK = (n) =>
       n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'K' : '$' + Math.round(n);
 
+    // Section and card headings, with the grey sub-line removed. Both used to
+    // take a note and print it under the heading, but every note was either
+    // restating the heading ("Claims by warehouse" / "Ranked by claims raised in
+    // 2026") or a use instruction rather than information about the data.
+    // The right-hand slot is untouched, so the controls that live there - the
+    // metric selectors, the year badge - still render.
+    //
+    // The callouts that sit under a *chart* rather than a heading are a
+    // different thing and stay: they carry data caveats (mock warehouse values,
+    // credit raised with no memo sent), which are not decoration.
     function sect(title, note, right) {
       return (
         `<div class="row sec">` +
-        `<div><h2>${title}</h2>${note ? `<span class="mu">${note}</span>` : ''}</div>` +
+        `<div><h2>${title}</h2></div>` +
         `<div class="sp"></div>${right || ''}</div>`
       );
     }
 
     function cardTitle(t, note, right) {
-      return `<div class="row cht"><h3>${t}</h3>${note ? `<span class="mu cht-n">${note}</span>` : ''}<div class="sp"></div>${right || ''}</div>`;
+      return `<div class="row cht"><h3>${t}</h3><div class="sp"></div>${right || ''}</div>`;
     }
 
     // Like-for-like: the current year is a part year, so last year is cut to the
@@ -131,40 +167,52 @@ let queueSearch = '';
     // actually looking for. The card itself is a flex column (.dcard) so the
     // breakdown can absorb whatever height the neighbouring cards set.
     function donut(key, data) {
-      if (!data.length) return '<p class="mu">No claims in this year.</p>';
+if (!data.length) return '<p class="mu">No claims in this year.</p>';
       const byValue = metric[key] === 'value';
       const i = byValue ? 2 : 1;
-      const color = (n) => COLORS[n % COLORS.length];
+      // Status is coloured by meaning (see STATUS_COLOR); team area falls back
+      // to the categorical palette.
+      const color = key === 'status'
+        ? (name) => STATUS_COLOR[name] || COLORS[0]
+        : (n) => COLORS[n % COLORS.length];
+      const colorAt = (d, n) => color(key === 'status' ? d[0] : n);
       const countTotal = data.reduce((s, d) => s + d[1], 0) || 1;
       const total = byValue ? data.reduce((s, d) => s + d[2], 0) : countTotal;
 
+// A gap between segments, in the same 0-100 units the arcs are drawn in. Without
+      // it two adjacent arcs butt together and their shared edge disappears, so
+      // a 3% slice next to a 40% slice has no visible boundary. The gap is taken
+      // out of the drawn length rather than added to it, so the ring still adds
+      // up to 100% and no slice is pushed out of alignment. A slice too small to
+      // lose the gap keeps a sliver rather than vanishing.
+      const GAP = 1.2;
       let offset = 25;
       const arcs = data.map((d, n) => {
         const p = (d[i] / total) * 100;
-        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${color(n)}" stroke-width="6" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="${offset}"><title>${esc(d[0])}: ${fmt(key, d[i])} (${p.toFixed(1)}%)</title></circle>`;
+        const draw = Math.max(p - GAP, Math.min(p, 0.35));
+        const c = colorAt(d, n);
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${c}" stroke-width="6" stroke-dasharray="${draw.toFixed(2)} ${(100 - draw).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"><title>${esc(d[0])}: ${fmt(key, d[i])} (${p.toFixed(1)}%)</title></circle>`;
         offset -= p;
         return arc;
       }).join('');
 
       const rows = data.map((d, n) => `
-          <div class="drow">
+        <div class="drow">
             <div class="dline">
-              <span class="dlbl"><i style="background:${color(n)}"></i><span title="${esc(d[0])}">${esc(d[0])}</span></span>
+              <span class="dlbl"><i style="background:${colorAt(d, n)}"></i><span title="${esc(d[0])}">${esc(d[0])}</span></span>
               <b>${fmt(key, d[i])}</b><em>${pnum(d[i], total).toFixed(1)}%</em>
             </div>
-            <div class="trk"><span style="width:${pnum(d[i], total).toFixed(1)}%;background:${color(n)}"></span></div>
+            <div class="trk"><span style="width:${pnum(d[i], total).toFixed(1)}%;background:${colorAt(d, n)}"></span></div>
           </div>`).join('');
 
-      // Data arrives ordered by count, but the toggle can rank it by credit, so
-      // the callout is picked by the measure actually on screen.
-      const lead = data.reduce((a, d) => (!a || d[i] > a[i] ? d : a), null);
-      const leadPct = lead ? pnum(lead[i], total) : 0;
-      const callout = lead
-        ? leadPct >= 50
-          ? `<span class="b High">${esc(lead[0])} carries ${leadPct.toFixed(0)}%</span><span class="mu">biggest team area</span>`
-          : `<span class="mu">Biggest: <b>${esc(lead[0])}</b> · ${leadPct.toFixed(1)}%</span>`
-        : '';
-
+      // The callout ("<status> carries 82% - biggest team area") and the two
+      // figures beside the ring are both gone. The callout named the largest
+      // slice and the card title above already says what the chart is, so it
+      // restated the donut in words; "biggest team area" was also wrong wording
+      // for a status card. The side figures repeated what the centre prints as
+      // a percentage and what the breakdown prints as counts. What is left is
+      // the ring, its centre and the per-status rows underneath.
+      //
       // The centre used to print the year's total claim count, which the stat
       // line at the top of the page already states, and the breakdown under it
       // repeated the same figure again as a dollars total. Both are gone: the
@@ -174,19 +222,91 @@ let queueSearch = '';
       // "Resolved" is the status bucket, not "not ClaimResolved", so denied and
       // cancelled claims are not counted as unfinished work here.
       const centerPct = S.total ? (S.resolved / S.total) * 100 : 0;
+      const labelKey = key === 'status' ? 'status' : (key === 'area' ? 'team area' : key);
       return (
         `<div class="dtop">
-            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of claims by team area">${arcs}` +
+            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of claims by ${labelKey}">${arcs}` +
             `<text x="21" y="22" text-anchor="middle" font-size="6.2" font-weight="600" fill="currentColor">${centerPct.toFixed(1)}%</text>` +
             `<text x="21" y="26.4" text-anchor="middle" font-size="2.5" font-weight="600" fill="#8fa69a" letter-spacing=".06em">RESOLVED</text></svg>
-            <div class="dtot">
-              <div><span class="mu">Resolved</span><em>${num(S.resolved)}</em></div>
-              <div><span class="mu">Team areas</span><em>${num(data.length)}</em></div>
-            </div>
           </div>
-          <div class="dlist">${rows}</div>
-          <div class="dfoot">${callout}</div>`
+          <div class="dlist">${rows}</div>`
       );
+    }
+
+    // [name, claims, credit]
+    // Scoped exactly like deptFacts. Re-aggregated per owner in the build rather
+    // than filtered, because one warehouse draws claims from every department
+    // and therefore from every owner.
+    function whFacts() {
+      const bucket = WH_FACTS[year] || WH_FACTS.all || { all: [] };
+      const me = getSession();
+      return isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
+    }
+
+    // Warehouse share, drawn the same way as the status ring beside it: an arc
+    // ring with a figure in the middle and a per-site breakdown underneath. It
+    // used to be a filled pie with the legend set alongside it, which made the
+    // two cards in this row look like different products - one ring, one solid
+    // disc - and left the warehouse card with no headline figure of its own.
+    // Matching the status card means a reader who has learnt to read one of them
+    // can read the other without looking twice.
+    //
+    // The sites stay ordered by claims with the largest first: the reader is
+    // ranking, not just reading a share. A ring is drawn for every site,
+    // including one with no claims, so a site cannot quietly vanish.
+    function pie(rows) {
+      const total = rows.reduce((a, d) => a + d[1], 0);
+      if (!total) return '<p class="mu">No claims in this year.</p>';
+      const color = (n) => COLORS[n % COLORS.length];
+      const nameOf = (w) => (WAREHOUSES.find((x) => x[0] === w) || [w, 'Unknown site'])[1];
+
+      // Same gap treatment as the status ring: taken out of each arc's length
+      // rather than added, so the arcs still total 100% and nothing drifts out
+      // of alignment. Arcs start at 12 o'clock and run clockwise.
+      const GAP = 1.2;
+      let offset = 25;
+      const arcs = rows.map((d, n) => {
+        const p = (d[1] / total) * 100;
+        const draw = Math.max(p - GAP, Math.min(p, 0.35));
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${color(n)}" stroke-width="6" stroke-dasharray="${draw.toFixed(2)} ${(100 - draw).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"><title>${esc(nameOf(d[0]))}: ${num(d[1])} claims (${p.toFixed(1)}%)</title></circle>`;
+        offset -= p;
+        return arc;
+      }).join('');
+
+      // Same row shape as the status breakdown: swatch, name, count, share, bar.
+      // The site code leads because the full names are long and would otherwise
+      // be the part that gets truncated.
+      const rows_ = rows.map((d, n) => `
+          <div class="drow">
+            <div class="dline">
+              <span class="dlbl"><i style="background:${color(n)}"></i><b class="wk">${esc(d[0])}</b><span class="wn" title="${esc(nameOf(d[0]))}">${esc(nameOf(d[0]))}</span></span>
+              <b>${num(d[1])}</b><em>${pnum(d[1], total).toFixed(1)}%</em>
+            </div>
+            <div class="trk"><span style="width:${pnum(d[1], total).toFixed(1)}%;background:${color(n)}"></span></div>
+          </div>`).join('');
+
+      // The centre carries the largest site's share - the one number a reader
+      // wants off this card, and the reason the rows are ranked the way they
+      // are. With a single site claiming everything this reads 100%, which is
+      // correct rather than a division by zero.
+      const top = rows[0];
+      const topPct = pnum(top[1], total);
+
+      return (
+        `<div class="dtop">
+            <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Share of ${year} claims by warehouse">${arcs}` +
+            `<text x="21" y="22" text-anchor="middle" font-size="6.2" font-weight="600" fill="currentColor">${topPct.toFixed(1)}%</text>` +
+            `<text x="21" y="26.4" text-anchor="middle" font-size="2.5" font-weight="600" fill="#8fa69a" letter-spacing=".06em">TOP SITE</text></svg>
+          </div>
+          <div class="dlist">${rows_}</div>`
+      );
+    }
+
+    function whPie() {
+      return pie(whFacts()) + `
+        <p class="mu" style="margin:10px 0 0;font-size:12px">Warehouses are mock A&ndash;F values read from the
+        export's <code>Warehouse</code> column, and it carries no unit counts &mdash; so these are shares of
+        all claims, not defect rates against goods handled.</p>`;
     }
 
     // rowsFor the types list carry a stable id and their own type name, because
@@ -243,6 +363,7 @@ let queueSearch = '';
         dept: d[0],
         count: d[3],
         credit: d[6],
+        of: rk.of(d),
         den: rk.den(d),
         rate: pnum(rk.of(d), rk.den(d))
       }));
@@ -255,24 +376,33 @@ let queueSearch = '';
 
       const th = (k, label, align) => {
         const on = deptSort === k;
-        return `<th class="${on ? 'on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
+        return `<th class="${align === 'right' ? 'r' : 'l'}${on ? ' on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
           `<button type="button" onclick="setDeptSort('${k}')">${esc(label)}` +
           `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
       };
 
+      // The bar in the rate column is scaled to the largest rate on screen, not to
+      // 100. For the money metric the values run into the thousands of dollars,
+      // so a bar measured against 100 would render every row as a sliver; a
+      // percentage metric still reads correctly against its own maximum.
+      const maxRate = Math.max(...rows.map((r) => r.rate), 1);
       const body = sorted.map((r) => {
         const thin = r.den < THIN_BASE;
         const hot = !thin && r.rate > rateAvg;
-        const tip = `Open cases in ${r.dept}` +
-          (thin ? ` · ${r.rate.toFixed(1)}% is off a base of only ${num(r.den)}, too small to read` : '');
+        // The rate column is one of three different measures, so the tooltip
+        // names the measure and shows the fraction rather than assuming a
+        // percent. "Open cases in <dept>" was wrong for every metric but one.
+        const tip = `${rk.label} in ${r.dept}: ${rk.fmt(r.rate)}` +
+          ` · ${rk.raw(r.of)} of ${num(r.den)}` +
+          (thin ? ` — a base of only ${num(r.den)} is too small to read` : '');
         return `<tr onclick="jump('de','${esc(r.dept)}')" tabindex="0"
             onkeydown="if(event.key==='Enter'||event.key===' '){jump('de','${esc(r.dept)}');return false}"
             title="${esc(tip)}">
           <td class="name">${esc(r.dept)}</td>
           <td class="n"><b>${num(r.count)}</b><span class="mb"><i style="width:${pnum(r.count, maxC).toFixed(1)}%"></i></span></td>
           <td class="n"><b>${usd(r.credit)}</b><span class="mb"><i style="width:${pnum(r.credit, maxV).toFixed(1)}%"></i></span></td>
-          <td class="n"><b class="${thin ? 'thin' : hot ? 'hi' : ''}">${r.rate.toFixed(1)}%</b>
-            <span class="mb"><i class="${thin ? 'thin' : hot ? 'hi' : ''}" style="width:${Math.min(100, r.rate).toFixed(1)}%"></i></span></td>
+          <td class="n"><b class="${thin ? 'thin' : hot ? 'hi' : ''}">${rk.fmt(r.rate)}</b>
+            <span class="mb"><i class="${thin ? 'thin' : hot ? 'hi' : ''}" style="width:${Math.min(100, pnum(r.rate, maxRate)).toFixed(1)}%"></i></span></td>
         </tr>`;
       }).join('');
 
@@ -320,7 +450,7 @@ let queueSearch = '';
       );
       const th = (k, label, align) => {
         const on = carSort === k;
-        return `<th class="${on ? 'on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
+        return `<th class="${align === 'right' ? 'r' : 'l'}${on ? ' on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
           `<button type="button" onclick="setCarSort('${k}')">${esc(label)}` +
           `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
       };
@@ -457,7 +587,7 @@ let queueSearch = '';
       );
     }
     function setMetric(key) { metric[key] = isMoney(key) ? 'count' : 'value'; render(); }
-    function setYear(y) { year = y; typesExpanded = false; focus = null; queueSearch = ''; render(); }
+    function setYear(y) { year = y; typesExpanded = false; focus = null; groupBeforeFocus = null; queueSearch = ''; render(); }
     function toggleTypes() { typesExpanded = !typesExpanded; render(); }
     function setRate(k) { rateMetric = k; render(); }
     function setDeptMoney(m) { deptMoney = m; render(); }
@@ -635,17 +765,8 @@ let queueSearch = '';
     // Weight only matters inside a priority tier, and matches where the same
     // item used to sit in reading order.
     function buildActions() {
-      const q = queue();
       const out = [];
       const add = (o) => { if (o.n > 0) out.push(o); };
-
-      const open = qcount(q, 'Unresolved');
-      add({
-        src: 'metric', prio: 1, w: 2, n: S.unresolved, kind: 'reason', value: 'Unresolved',
-        label: 'Open claims',
-        v: `${cash(qsum(open))} exposure · ${pct(S.unresolved, S.total)} of intake`,
-        go: 'Open queue'
-      });
 
       add({
         src: 'metric', prio: 1, w: 3, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
@@ -697,21 +818,19 @@ let queueSearch = '';
         </div>`;
     };
 
-    // One grid, one sort. The group header that used to split AI cards from
-    // metric cards is gone - it labelled a distinction the feed no longer makes
-    // in the ordering. Its place is taken by a legend for the three priority
-    // tiers, which is the thing a reader now has to decode.
+    // One grid, one sort. Two headers that used to sit here are both gone. The
+    // first split AI cards from metric cards, which the feed no longer
+    // distinguishes in its ordering. The second was a legend for the three
+    // priority tiers, which every card already labels for itself.
     function renderFindings() {
       const all = buildActions();
       if (!all.length) return '<p class="mu">Nothing outstanding this year.</p>';
-      const legend = Object.keys(PRIO)
-        .map((k) => `<span class="tag ${PRIO[k][1]}">${PRIO[k][0]}</span>`).join('');
-      return `
-        <div class="agl">${legend}
-          <div class="sp"></div>
-          <span class="mu" style="font-size:12px">${all.length} card${all.length === 1 ? '' : 's'}</span>
-        </div>
-        <div class="grid g3">${all.map(actCard).join('')}</div>`;
+      // Nothing sits above the grid any more. That row carried the priority-tier
+      // legend first, then the card count once the legend was removed - a key to
+      // three tiers that every card already labels for itself, followed by a
+      // count of the cards directly below it. The tier still decides the sort
+      // order; that behaviour is untouched.
+      return `<div class="grid g3">${all.map(actCard).join('')}</div>`;
     }
 
     // ---------- open claims table ----------
@@ -755,12 +874,23 @@ let queueSearch = '';
 
     function jump(kind, value) {
       focus = { kind, value, label: value };
+      // The grouping has to follow the filter, or the jump lands on nothing.
+      // groupedTable opens the one group whose key equals the active filter, and
+      // an AI card filters by claim type while a metric card filters by flag - so
+      // if the reader's grouping is neither, that key is in no bucket, every
+      // group stays closed, and scrolling down shows a table of headers with no
+      // rows under them.
+      if (kind in QUEUE_GROUPS && kind !== queueGroup) {
+        groupBeforeFocus = queueGroup;
+        queueGroup = kind;
+      }
       render();
       document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function clearFocus() {
       focus = null;
+      if (groupBeforeFocus) { queueGroup = groupBeforeFocus; groupBeforeFocus = null; }
       render();
       document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -832,9 +962,10 @@ let queueSearch = '';
             ${isSearching ? `<button class="qclear" type="button" onclick="setQueueSearch('')" aria-label="Clear search">×</button>` : ''}
           </div>
           <span class="mu">Group by</span>
-          <select onchange="queueGroup=this.value;openGroups.clear();render()">
+          <select onchange="queueGroup=this.value;openGroups.clear();render()"${focus ? ' disabled title="Grouping is following the card filter above — clear it to choose your own"' : ''}>
             ${Object.entries(QUEUE_GROUPS).map(([k, v]) => `<option value="${k}"${queueGroup === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
           </select>
+          ${focus ? '<span class="mu" style="font-size:12px">following the filter above</span>' : ''}
           <div class="sp"></div>
           ${filtering ? `<span class="mu">${num(shown.length)} of ${num(all.length)} shown</span>` : ''}
           <button class="btn s" onclick="expandAllGroups()">Expand all</button>
@@ -898,17 +1029,29 @@ let queueSearch = '';
 
       const memoGap = df.reduce((a, d) => a + (d[6] - d[8]), 0);
 
+      // The third column is a ratio the reader picks. Each entry says what to
+      // divide by what, and fmt says how the result is written - two of these
+      // are percentages and one is money per claim, so the unit cannot be
+      // assumed from the arithmetic.
+      //
+      // "Credit per claim" replaced a "cost nothing" tab that showed exactly the
+      // same numbers as "still open". Both counted claims that were open and
+      // uncredited, which in this export are the same claims: a claim stays open
+      // precisely because it has not been credited yet, so open (d[5]) and
+      // noCredit (d[10]) held the same value in 218 of 262 department rows. Two
+      // labels over one number reads as a broken button. Credit per claim is a
+      // different population entirely and is the one a manager can act on.
       const RATES = {
-        open: { label: 'Still open', of: (d) => d[5], den: (d) => d[3] },
-        repeat: { label: 'Repeat orders', of: (d) => d[9], den: (d) => d[4] },
-        free: { label: 'Cost nothing', of: (d) => d[10], den: (d) => d[3] }
+        open: { label: 'Still open', of: (d) => d[5], den: (d) => d[3], fmt: (v) => v.toFixed(1) + '%', raw: num },
+        repeat: { label: 'Repeat orders', of: (d) => d[9], den: (d) => d[4], fmt: (v) => v.toFixed(1) + '%', raw: num },
+        credit: { label: 'Credit per claim', of: (d) => d[6], den: (d) => d[3], fmt: (v) => usd(v), raw: (v) => usd(v), money: true }
       };
       const rk = RATES[rateMetric];
       const rateAvg = pnum(df.reduce((a, d) => a + rk.of(d), 0), df.reduce((a, d) => a + rk.den(d), 0));
 
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:6px">
-          <div><h1>Claims Dashboard</h1><span class="mu">${esc(S.range)} · ${num(S.total)} claims · ${usd(S.credit)}</span></div>
+          <div><h1>Claims Dashboard</h1><span class="mu">${esc(S.range)}</span></div>
           <div class="sp"></div>
           <div class="dropdown">
             <button class="dd-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"
@@ -931,7 +1074,11 @@ let queueSearch = '';
             </div>`).join('')}
         </div>
 
-        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', `<span class="b High">${num(openItems)} open</span>`)}
+        // No badge on the right: the "N open" count it used to carry duplicated the
+        // Open Claims heading further down the page, which is the same population
+        // stated twice with two different figures - this one counted the wider
+        // queue, that one the narrower unresolved set.
+        ${sect('Needs Attention', 'Patterns and metrics, most urgent first')}
         ${renderFindings()}
 
         <div class="split"></div>
@@ -948,11 +1095,11 @@ let queueSearch = '';
           </div>
         </div>
 
-        ${sect('Where the Claims Come From')}
-        <div class="grid g2">
+        ${sect('Where the Claims Come From', 'Team area, fault type and the site the product was sitting at')}
+        <div class="grid g3">
           <div class="card dcard">
-            ${cardTitle('Claims by team area', '')}
-            ${donut('area', S.area)}
+            ${cardTitle('Claims by status', '')}
+            ${donut('status', S.status)}
           </div>
           <div class="card">
             ${cardTitle('Top claim types', '', seg('types', 'Count', 'Credit'))}
@@ -963,6 +1110,10 @@ let queueSearch = '';
               <button class="btn s" onclick="toggleTypes()">${typesExpanded ? '— Top 10' : `+ ${S.types.length - TYPES_TOP}`}</button>
             </div>
           </div>
+          <div class="card dcard">
+            ${cardTitle('Claims by warehouse', `Ranked by claims raised in ${year}`)}
+            ${whPie()}
+          </div>
         </div>
 
         ${sect('Department Comparison', 'Count, credit and rate on one axis — click any column to sort')}
@@ -970,7 +1121,7 @@ let queueSearch = '';
           ${cardTitle('', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
           ${deptTable(df, rk, rateAvg)}
           <div class="row" style="margin-top:10px">
-            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rateAvg.toFixed(1)}% average · click a row to open its cases</span>
+            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rk.fmt(rateAvg)} average · click a row to open its cases</span>
           </div>
         </div>
 

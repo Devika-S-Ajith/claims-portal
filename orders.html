@@ -10,10 +10,22 @@
   <script src="app.js"></script>
   <script>
     // ------------------------------------------------------------------
-    // The export carries OrderID and nothing else about the order: no
-    // customer, product, quantity, price or carrier. So an "order" here is a
-    // real aggregate of the claims raised against it, and the page says so
-    // rather than inventing an invoice.
+    // What is actually listed here, because the list is not the export.
+    //
+    // The export has 25,485 distinct OrderIDs, but an order that raised one
+    // claim and was closed has nothing left to work on and no way to tell it
+    // apart from the 24,000 others in the same state. build-data.js therefore
+    // keeps only orders that raised more than one claim OR still hold an open
+    // one, sorts those by claim count, and embeds the top 400. Every one of the
+    // 400 is a repeat-claim order - the open-claim branch added nothing on its
+    // own - so the "repeat" filter below is the whole list by construction.
+    //
+    // The counts on this page are therefore counts within that 400, not across
+    // the export, and the header says so rather than implying it is everything.
+    //
+    // The export carries OrderID and nothing else about the order: no customer,
+    // product, quantity, price or carrier. So an "order" here is a real
+    // aggregate of the claims raised against it.
     //   [id, claims, credit, open, deptCount, firstClaim, lastClaim, orderType, owners, carrier]
     //
     // A carrier is the one thing here that is not a column in the export. It is
@@ -24,7 +36,23 @@
     // ------------------------------------------------------------------
     let selectedOrder = '';
     let orderQuery = '';
-    let onlyMulti = false;
+    let orderFilter = 'all';
+    let orderOwner = '';   // an owner id, or '' for every routed owner (admin only)
+    let pageSize = 10;
+    let page = 1;
+
+    // Every cut is expressible against the embedded columns, so no filter here
+    // has to invent a field the export does not carry. Thresholds are stated in
+    // the labels rather than hidden, so a reader knows what a filter is selecting.
+    const FILTERS = [
+      ['all', () => true, 'All orders'],
+      ['open', (o) => o[3] > 0, 'Still hold an open claim'],
+      ['repeat3', (o) => o[1] >= 3, '3+ claims raised'],
+      ['cross', (o) => o[4] > 1, 'Spans more than one department'],
+      ['big', (o) => o[2] >= 1000, 'Credit of $1,000 or more'],
+      ['carrier', (o) => !!o[9], 'Claims name a carrier']
+    ];
+    const PAGE_SIZES = [10, 25, 50, 100];
 
     const orderOwners = (o) => (o[8] || '').split('~').filter(Boolean);
     const orderLabel = (o) => o[7] || 'Customer Order';
@@ -37,24 +65,87 @@
           : ' <span class="mu" style="font-size:11px">from the claims</span>') : '');
     }
 
-    function visibleOrders() {
+    // Role scope first, then the reader's own cuts. A manager is already down to
+    // their caseload here, so the owner filter is only offered to an admin - for
+    // anyone else it would be a control with exactly one possible value.
+    function filteredOrders() {
       const s = getSession();
       let rows = ORDERS;
       if (s && s.role !== 'Admin') rows = rows.filter((o) => orderOwners(o).includes(s.id));
-      if (onlyMulti) rows = rows.filter((o) => o[1] > 1);
-      if (orderQuery) {
-        const q = orderQuery.trim().toLowerCase();
-        if (q) rows = rows.filter((o) => String(o[0]).toLowerCase().includes(q));
-      }
+      if (orderOwner) rows = rows.filter((o) => orderOwners(o).includes(orderOwner));
+      const f = (FILTERS.find((x) => x[0] === orderFilter) || FILTERS[0])[1];
+      rows = rows.filter(f);
+      const q = orderQuery.trim().toLowerCase();
+      if (q) rows = rows.filter((o) => String(o[0]).toLowerCase().includes(q));
       return rows;
     }
 
-    function render() {
-      const orders = visibleOrders();
+    // A page count is not a row count: the last page holds whatever is left, so
+    // it is almost never full. The pager therefore numbers pages, not rows, and
+    // the caption states the row range actually on screen. Clamping here rather
+    // than in a handler means a filter that shrinks the list can never leave the
+    // page pointing past the end.
+    function pageSlice(rows) {
+      const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+      page = Math.min(Math.max(1, page), pages);
+      const from = (page - 1) * pageSize;
+      return { page, pages, from, to: Math.min(from + pageSize, rows.length), rows: rows.slice(from, from + pageSize) };
+    }
+
+    function setPage(n) { page = n; render(); }
+    function setPageSize(n) { pageSize = n; page = 1; render(); }
+
+    // Every filter change returns to page 1: staying on page 7 of a list that
+    // now has one page reads as "no results" when there are results.
+    function setFilter(k, v) {
+      if (k === 'orderQuery') orderQuery = v; else orderFilter = v;
+      page = 1;
+      render(true);
+    }
+    function setOwner(v) { orderOwner = v; page = 1; render(); }
+
+    // Page numbers with the run around the current page kept and the rest
+    // elided - 40 buttons is a worse control than none.
+    function pageButtons(p) {
+      const wanted = new Set([1, 2, p.page - 1, p.page, p.page + 1, p.pages - 1, p.pages]);
+      let out = '';
+      let prev = 0;
+      [...wanted].filter((n) => n >= 1 && n <= p.pages).sort((a, b) => a - b).forEach((n) => {
+        if (n - prev > 1) out += '<span class="pgap" aria-hidden="true">…</span>';
+        out += `<button type="button" class="pgnum${n === p.page ? ' on' : ''}" onclick="setPage(${n})"` +
+          `${n === p.page ? ' aria-current="page"' : ''}>${n}</button>`;
+        prev = n;
+      });
+      return out;
+    }
+
+    function pager(p, total) {
+      if (!total) return '';
+      const one = p.pages < 2;
+      const off = (b) => (one || b ? ' disabled' : '');
+      return `<div class="pager">
+        <span class="mu">Showing ${num(p.from + 1)}–${num(p.to)} of ${num(total)} matching order${total === 1 ? '' : 's'} · page ${p.page} of ${p.pages}</span>
+        <div class="sp"></div>
+        <select onchange="setPageSize(+this.value)" aria-label="Orders per page" style="font-size:12px;padding:4px 8px">
+          ${PAGE_SIZES.map((n) => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n} per page</option>`).join('')}
+        </select>
+        <button type="button" class="pgnum" onclick="setPage(1)"${off(p.page <= 1)} aria-label="First page">&#171;</button>
+        <button type="button" class="pgnum" onclick="setPage(${p.page - 1})${off(p.page <= 1)}" aria-label="Previous page">&#8249;</button>
+        ${pageButtons(p)}
+        <button type="button" class="pgnum" onclick="setPage(${p.page + 1})${off(p.page >= p.pages)}" aria-label="Next page">&#8250;</button>
+        <button type="button" class="pgnum" onclick="setPage(${p.pages})${off(p.page >= p.pages)}" aria-label="Last page">&#187;</button>
+      </div>`;
+    }
+
+    function render(keepSearch) {
+      const orders = filteredOrders();
+      const p = pageSlice(orders);
+      const shown = p.rows;
       const s = getSession();
       const admin = isAdmin();
 
-      const shown = orders.slice(0, 100);
+      // Selection is held against the whole filtered set, not the visible page,
+      // so paging away from a selected order and back keeps it selected.
       if (!orders.some((o) => o[0] === selectedOrder)) selectedOrder = orders.length ? orders[0][0] : '';
       const order = orders.find((o) => o[0] === selectedOrder) || orders[0];
 
@@ -65,6 +156,8 @@
       const totalCredit = orders.reduce((a, o) => a + o[2], 0);
       const totalClaims = orders.reduce((a, o) => a + o[1], 0);
       const repeat = orders.filter((o) => o[1] > 1).length;
+      const filterLabel = (FILTERS.find((x) => x[0] === orderFilter) || FILTERS[0])[2];
+      const narrowed = orderFilter !== 'all' || orderQuery.trim() || orderOwner;
 
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:4px">
@@ -73,13 +166,20 @@
         <div class="row" style="margin-bottom:14px">
           <span class="b ${admin ? 'Low' : 'Med'}">${admin ? 'Admin · all orders' : 'Manager · your caseload only'}</span>
           <span class="mu" style="font-size:12px">${admin
-            ? 'Every order in the export that raised a claim.'
-            : `Only orders carrying a claim routed to ${esc(s.name)}.`}</span>
+            ? `The ${num(ORDERS.length)} orders that raised more than one claim or still hold an open one, out of ${num(25485)} in the export.`
+            : `Your orders out of the ${num(ORDERS.length)} listed · only orders carrying a claim routed to ${esc(s.name)}.`}</span>
           <div class="sp"></div>
-          <input placeholder="Find order ID" value="${esc(orderQuery)}" oninput="orderQuery=this.value;render()" style="width:170px">
-          <label class="mu" style="font-size:12px;display:flex;gap:6px;align-items:center;cursor:pointer">
-            <input type="checkbox" ${onlyMulti ? 'checked' : ''} onchange="onlyMulti=this.checked;render()"> repeat-claim only
-          </label>
+          <div class="qsearch">
+            <input id="orderq" placeholder="Find order ID" value="${esc(orderQuery)}" oninput="setFilter('orderQuery', this.value)" style="padding-right:11px">
+          </div>
+          <select onchange="orderFilter=this.value;page=1;render()" aria-label="Filter orders" title="Filter orders">
+            ${FILTERS.map(([k, , label]) => `<option value="${k}"${k === orderFilter ? ' selected' : ''}>${label}</option>`).join('')}
+          </select>
+          ${admin ? `<select onchange="setOwner(this.value)" aria-label="Filter by routed owner" title="Filter by routed owner">
+            <option value=""${orderOwner ? '' : ' selected'}>All routed owners</option>
+            ${OWNERS.map((o) => `<option value="${o.id}"${orderOwner === o.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
+          </select>` : ''}
+          ${narrowed ? `<button class="btn s" onclick="orderQuery='';orderFilter='all';orderOwner='';page=1;render()">Clear</button>` : ''}
         </div>
 
         <div class="grid" style="grid-template-columns:3fr 2fr;align-items:start">
@@ -98,9 +198,7 @@
               </tr>`).join('')
               : `<tr><td colspan="8" class="mu">No orders match this filter.</td></tr>`}
           </table>
-          ${orders.length > shown.length
-            ? `<div class="mu" style="font-size:12px;padding:10px 14px">Showing first ${shown.length} of ${num(orders.length)} matching orders — narrow the search to see more.</div>`
-            : ''}
+          ${pager(p, orders.length)}
           </div>
 
           ${order ? `
@@ -134,7 +232,7 @@
         </div>
 
         <div class="row sec" style="margin-top:24px">
-          <div><h3>Repeat-claim orders</h3><span class="mu">${num(repeat)} of the ${num(orders.length)} orders in scope raised more than one claim</span></div>
+          <div><h3>Repeat-claim orders</h3><span class="mu">${num(repeat)} of the ${num(orders.length)} orders in scope raised more than one claim${narrowed ? ` · currently filtered to “${esc(filterLabel)}”` : ''}</span></div>
         </div>
         <div class="grid g4">
           <div class="card kpi"><small>Orders in scope</small><b>${num(orders.length)}</b><span class="flat">${num(totalClaims)} claims behind them</span></div>
@@ -142,6 +240,17 @@
           <div class="card kpi"><small>Credit on these orders</small><b>${usd(totalCredit)}</b><span class="flat">${usd(orders.length ? totalCredit / orders.length : 0)} average</span></div>
           <div class="card kpi"><small>Orders with open claims</small><b>${num(orders.filter((o) => o[3] > 0).length)}</b><span class="up">still unresolved work</span></div>
         </div>`;
+
+      // Re-rendering the page replaces the search box, which would otherwise drop
+      // focus on the first keystroke and make typing an order ID impossible.
+      // Re-focusing and pinning the caret to the end keeps it usable.
+      if (keepSearch) {
+        const box = document.getElementById('orderq');
+        if (box) {
+          box.focus();
+          box.setSelectionRange(box.value.length, box.value.length);
+        }
+      }
     }
 
     function main() {

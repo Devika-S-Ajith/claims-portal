@@ -273,7 +273,6 @@ const NAV_DASHBOARDS = [
 const NAV_ITEMS = [
   ['claims', 'Claims', 'claims.html', ''],
   ['orders', 'Orders', 'orders.html', ''],
-  ['dept', 'Departments', 'departments.html', ''],
   ['admin', 'Settings', 'admin.html', 'Admin']
 ];
 

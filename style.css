@@ -13,12 +13,15 @@ nav a{padding:7px 18px;border-radius:9px;color:var(--mu);cursor:pointer;font-wei
 nav a:hover{color:var(--tx)}
 nav a.on{background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08)}
 /* Dashboard tab with a dropdown: the label and the caret are one control, so the
-   tab reads as a single item and only the caret opens the menu. */
-.nav-dd{position:relative;display:flex;align-items:center}
-.nav-dd .dd-label{border-top-right-radius:0;border-bottom-right-radius:0}
-.nav-dd.on .dd-label,.nav-dd.open .dd-label{background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08)}
-.dd-caret{border:0;background:transparent;color:var(--mu);cursor:pointer;font:inherit;font-size:10px;line-height:1;padding:7px 10px 7px 4px;margin-left:-14px;border-radius:0 9px 9px 0;transition:.2s}
-.nav-dd.on .dd-caret,.nav-dd.open .dd-caret{background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08)}
+   tab reads as a single item and only the caret opens the menu. The active fill
+   and shadow live on the wrapper, not on the two children - painted separately
+   each part drew its own shadow, so the seam between them was visible and the
+   one tab read as two highlighted pills. */
+.nav-dd{position:relative;display:flex;align-items:center;border-radius:9px;transition:background .2s,box-shadow .2s}
+.nav-dd.on,.nav-dd.open{background:var(--card);box-shadow:0 1px 2px rgba(16,24,40,.08)}
+.nav-dd.on .dd-label,.nav-dd.open .dd-label{background:transparent;color:var(--pr-d);box-shadow:none}
+.dd-caret{border:0;background:transparent;color:var(--mu);cursor:pointer;font:inherit;font-size:10px;line-height:1;padding:7px 10px 7px 4px;margin-left:-14px;border-radius:0 9px 9px 0;transition:color .2s}
+.nav-dd.on .dd-caret,.nav-dd.open .dd-caret{color:var(--pr-d)}
 .dd-caret:hover{color:var(--pr-d)}
 .dd-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:190px;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 12px 28px -8px rgba(16,24,40,.22);padding:5px;display:none;z-index:60}
 .nav-dd.open .dd-menu,.dropdown.open .dd-menu{display:block}
@@ -26,12 +29,15 @@ nav a.on{background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,2
 .dd-menu a:hover{background:var(--pl);color:var(--tx)}
 .dd-menu a.on{background:var(--pl);color:var(--pr-d);font-weight:600}
 /* Reporting-year picker. Styled as a nav tab so it matches the Dashboard tab
-   above it rather than looking like a foreign control in the page header. */
+   above it rather than looking like a foreign control in the page header - and
+   like an active tab, it is filled and coloured the moment it has a value. It
+   was only dressed that way while its menu was open, so the filter carrying the
+   whole page's year read as greyed-out chrome the rest of the time. */
 .dropdown{position:relative}
-.dd-trigger{display:flex;align-items:center;gap:1px;border:0;background:transparent;color:var(--mu);font:inherit;font-size:14px;font-weight:500;padding:7px 14px 7px 18px;border-radius:9px;cursor:pointer;transition:.2s}
-.dd-trigger:hover{color:var(--tx)}
-.dropdown.open .dd-trigger{background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08)}
-.dd-trigger .dd-caret{margin:0;padding:0 14px 0 4px;font-size:10px}
+.dd-trigger{display:flex;align-items:center;gap:1px;border:0;background:var(--card);color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08);font:inherit;font-size:14px;font-weight:500;padding:7px 14px 7px 18px;border-radius:9px;cursor:pointer;transition:box-shadow .2s,color .2s}
+.dd-trigger:hover{color:var(--pr-d);box-shadow:0 1px 2px rgba(16,24,40,.08),0 0 0 3px color-mix(in srgb,var(--pr) 16%,transparent)}
+.dropdown.open .dd-trigger{box-shadow:0 1px 2px rgba(16,24,40,.08),0 0 0 3px color-mix(in srgb,var(--pr) 26%,transparent)}
+.dd-trigger .dd-caret{margin:0;padding:0 14px 0 4px;font-size:10px;color:inherit}
 .year-menu{min-width:150px;max-height:340px;overflow:auto;padding:5px}
 .year-menu button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;background:transparent;color:var(--tx);font:inherit;font-size:13px;padding:8px 12px;border-radius:8px;cursor:pointer}
 .year-menu button:hover{background:var(--pl)}
@@ -101,6 +107,11 @@ h1{font-size:22px;margin:0;letter-spacing:-.01em}h2{font-size:17px;margin:0;lett
 .btn.ghost{background:transparent}
 input,select,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 12px;transition:.2s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.18)}
+/* A field held still by something else on the page - a select the active filter
+   owns - has to look held on purpose. Left at full strength it just reads as
+   broken, because a dimmed control and a frozen one look nothing alike until you
+   try to click them. */
+input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 textarea{width:100%;min-height:64px}
 .tw{overflow-x:auto;border-radius:12px}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -312,7 +323,6 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 /* One flat list. No gradients, no lift, no shadow - the only things separating
    one card from the next are its priority accent and its two tags, so the feed
    reads as a queue rather than a set of unrelated tiles. */
-.agl{display:flex;align-items:center;gap:8px;margin:14px 0 10px;flex-wrap:wrap}
 .split{margin:30px 0 4px;border:0;border-top:1px solid var(--bd)}
 
 /* Priority tag, and the source tag beside it. Both are tinted pills with a
@@ -341,9 +351,21 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ncard .ac-jump{color:inherit;text-decoration:none;display:block}
 .ncard .ac-jump::after{content:"";position:absolute;inset:0;border-radius:inherit}
 .ncard .ac-jump:hover{color:inherit}
-.ncard .ac-act{position:relative;z-index:1;margin-top:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:13px}
+/* The action row is raised above the stretched link so the button in it can be
+   clicked - but raised means it also covers the verb pill and the padding either
+   side of it, which are meant to be the card. A click landing on the most
+   obviously pressable thing on the card and doing nothing is the one outcome
+   worse than a slightly smaller hit area, so the row passes clicks through and
+   takes them back only on the button. */
+.ncard .ac-act{position:relative;z-index:1;margin-top:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:13px;pointer-events:none}
+.ncard .ac-view{pointer-events:auto}
 .ncard .go{margin-top:0}
 .ncard:hover .go{background:var(--pr-d);color:#fff}
+/* Keyboard focus has to land on the whole card, the way a pointer click does.
+   Without this the ring traces the anchor's text and leaves the reader guessing
+   how much of the card is live. */
+.ncard .ac-jump:focus-visible{outline:none}
+.ncard:has(.ac-jump:focus-visible){border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
 /* Secondary control on the same card: steps out of the queue and lands on the
    named row in Top claim types instead. Text-only, so it cannot be mistaken for
    the primary verb. */
@@ -361,18 +383,31 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
    column vertically and compare departments down the page. */
 .ctable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
 .ctable th,.ctable td{padding:9px 14px;border-bottom:1px solid var(--bd);vertical-align:middle}
-.ctable thead th{padding:0;border-bottom:1px solid var(--bd2)}
-.ctable thead th button{all:unset;display:flex;align-items:center;gap:5px;width:100%;padding:9px 14px;cursor:pointer;font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em}
+.ctable thead th{padding:0;border-bottom:1px solid var(--bd2);position:relative}
+.ctable thead th button{all:unset;display:flex;align-items:center;gap:5px;width:100%;padding:9px 14px;cursor:pointer;font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+/* A numeric column is read off its right edge, so its header label is packed
+   right as well. text-align on the th cannot do this - the header is a flex
+   button, and text-align does not lay out flex items - so the packing is set
+   here. Left-packed labels over right-aligned figures is what made these two
+   tables unreadable: no vertical line from a header to its own number. */
+.ctable thead th.r button{justify-content:flex-end}
 .ctable thead th button:hover{color:var(--tx)}
 .ctable thead th.on button{color:var(--pr-d)}
 .ctable thead th .car{font-size:10px;line-height:1}
+/* The caret keeps its slot whether or not it is showing, so sorting a column
+   moves the rows and not the label they belong to. */
+.ctable thead th.r .car{flex:none;width:9px;text-align:center;visibility:hidden}
+.ctable thead th.r.on .car{visibility:visible}
+/* In a left-aligned column the caret sits in the label's own trailing space,
+   out of flow, so the label still starts on the cell's left edge. */
+.ctable thead th.l .car{position:absolute;left:14px;top:50%;transform:translateY(-50%)}
 .ctable tbody tr{cursor:pointer;transition:background .15s}
 .ctable tbody tr:hover{background:var(--pl)}
 .ctable tbody tr:focus-visible{outline:2px solid var(--pr);outline-offset:-2px}
 .ctable tbody tr:last-child td{border-bottom:0}
 .ctable td.name{font-weight:600;color:var(--tx);white-space:nowrap}
-.ctable td.n{width:132px}
-.ctable td.n b{display:block;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.ctable td.n{width:132px;text-align:right;white-space:nowrap}
+.ctable td.n b{display:block;font-variant-numeric:tabular-nums;font-weight:600}
 .ctable td.n b.hi{color:var(--er)}
 /* A rate off a base too small to read: present, but not dressed as a verdict. */
 .ctable td.n b.thin{color:var(--mu);font-weight:500}
@@ -392,10 +427,6 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .dcard{display:flex;flex-direction:column}
 .dtop{display:flex;align-items:center;justify-content:center;gap:18px}
 .dtop .donut{flex:none}
-.dtot{flex:1;min-width:0;display:grid;gap:9px}
-.dtot div{display:flex;align-items:baseline;gap:8px;font-size:12px;padding-bottom:8px;border-bottom:1px dashed var(--bd)}
-.dtot div:last-child{border-bottom:0;padding-bottom:0}
-.dtot em{margin-left:auto;font-style:normal;font-weight:700;color:var(--tx);font-variant-numeric:tabular-nums;white-space:nowrap}
 .dlist{flex:1;display:grid;gap:12px;align-content:space-evenly;margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)}
 .drow{display:grid;gap:5px}
 .dline{display:flex;align-items:baseline;gap:8px;font-size:12px}
@@ -408,6 +439,29 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .drow .trk span{display:block;height:100%;border-radius:6px;transition:width .3s}
 .dfoot{flex:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--bd);font-size:12px;color:var(--mu);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dfoot b{color:var(--tx)}
+
+/* ---- dashboard: warehouse share card ---- */
+/* The warehouse card is now drawn with the same ring + breakdown rows as the
+   status card, so the two cards in this row are the same chart twice with
+   different labels - which is the point. It used to be a filled pie with its own
+   legend layout, so the row read as two different products. The .wpie legend
+   styles went with it; only the two name styles the shared rows need remain. */
+.dcard .dlbl b.wk{font-weight:700;line-height:1.2;flex:none}
+.dcard .dlbl span.wn{color:var(--mu);flex:1 1 auto;min-width:0}
+
+/* ---- orders: pagination ---- */
+/* Page numbers, not row numbers: the last page holds whatever is left over and
+   is almost never full, so numbering rows would imply a grid that isn't there.
+   The run around the current page is kept and the rest elided, because forty
+   buttons is a worse control than none. */
+.pager{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:11px 14px;border-top:1px solid var(--bd)}
+.pager .mu{font-size:12px}
+.pager select{font-size:12px;padding:4px 8px}
+.pgnum{min-width:30px;height:28px;padding:0 8px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit;font-size:12px;line-height:1;cursor:pointer;transition:.15s}
+.pgnum:hover:not(:disabled){border-color:var(--pr);color:var(--pr-d)}
+.pgnum.on{background:var(--pr);border-color:transparent;color:#fff;font-weight:600}
+.pgnum:disabled{opacity:.38;cursor:not-allowed}
+.pgap{color:var(--mu);font-size:12px;padding:0 1px;line-height:1}
 
 /* ---- dashboard: month-on-month comparison ---- */
 .mchart{position:relative;display:flex;flex-direction:column;margin-top:12px}
