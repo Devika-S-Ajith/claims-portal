@@ -1074,10 +1074,6 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
             </div>`).join('')}
         </div>
 
-        // No badge on the right: the "N open" count it used to carry duplicated the
-        // Open Claims heading further down the page, which is the same population
-        // stated twice with two different figures - this one counted the wider
-        // queue, that one the narrower unresolved set.
         ${sect('Needs Attention', 'Patterns and metrics, most urgent first')}
         ${renderFindings()}
 
