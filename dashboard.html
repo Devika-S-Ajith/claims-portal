@@ -56,7 +56,8 @@ let focus = null;
     let deptDir = -1;
     // 'amount' or 'share' for the ranked credit bars under Where the Money Goes.
     let deptMoney = 'amount';
-    // 'claims' | 'credit' | 'open' | 'damage' | 'name' for the carrier scorecard.
+    // 'claims' | 'credit' | 'open' | any of the reason keys below | 'name' for the
+    // carrier scorecard.
     let carSort = 'claims';
     let carDir = -1;
     const metric = { types: 'count' };
@@ -429,15 +430,45 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     // Sort key -> tuple index, so the comparator is a lookup rather than a
     // chain of ternaries. 'p90' is column 8; an untimed carrier reads 0 and
     // sorts last, which is the honest order for an unmeasurable cell.
-    const CARRIER_KEY = { name: 0, claims: 1, open: 3, damage: 6, credit: 5, p90: 8 };
+    //
+    // The reason columns used to be one 'Damage or loss' figure, and it was one
+    // regex matching damage, loss, wrong item AND late delivery - so a courier
+    // that lost parcels and a courier that ran late scored the same. build-data.js
+    // splits that into six named reasons, first match wins, so they PARTITION the
+    // claims column and the six figures add up to Claims. The last of them is the
+    // remainder: claims that name a courier but whose stated reason is a billing
+    // or communication dispute, a product fault, or the courier mentioned in
+    // passing. Those are not courier failures and are printed muted so they do
+    // not read as a peer of the five.
+    const CARRIER_KEY = {
+      name: 0, claims: 1, open: 3, credit: 5, damage: 6, p90: 8,
+      late: 10, wrong: 11, account: 12, freight: 13, none: 14
+    };
     const CARRIER_COLS = [
       ['name', 'Carrier', 'left'],
       ['claims', 'Claims', 'right'],
       ['open', 'Open', 'right'],
       ['damage', 'Damage or loss', 'right'],
+      ['late', 'Late or not delivered', 'right'],
+      ['wrong', 'Wrong item or qty', 'right'],
+      ['account', 'Shipping account or address', 'right'],
+      ['freight', 'Freight or packaging', 'right'],
+      ['none', 'Not a carrier fault', 'right'],
       ['credit', 'Credit', 'right'],
       ['p90', 'Slowest 10% closed in', 'right']
     ];
+    // Why each reason is counted the way it is, read off the same wording the
+    // build matches on. Without this the six columns are six bare nouns and the
+    // boundary between "late" and "lost" - the one a reader is most likely to
+    // query - is invisible.
+    const CARRIER_WHY = {
+      damage: 'Arrived broken, or went missing in the network',
+      late: 'Did not ship, deliver or arrive when it was promised',
+      wrong: 'Wrong goods, or the wrong quantity of them',
+      account: 'Wrong shipping account, method, label or address',
+      freight: 'Freight or packaging calculated or applied wrongly',
+      none: 'Names a courier, but the stated reason is not one of the courier\'s'
+    };
     function carrierTable(cf) {
       if (!cf.length) {
         return '<p class="mu" style="margin:14px 0 4px">No claim in ' + esc(String(year)) +
@@ -452,24 +483,35 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       );
       const th = (k, label, align) => {
         const on = carSort === k;
-        return `<th class="${align === 'right' ? 'r' : 'l'}${on ? ' on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}">` +
+        return `<th class="${align === 'right' ? 'r' : 'l'}${on ? ' on' : ''}" style="text-align:${align}" aria-sort="${on ? (dir === -1 ? 'descending' : 'ascending') : 'none'}"${CARRIER_WHY[k] ? ` title="${esc(CARRIER_WHY[k])}"` : ''}>` +
           `<button type="button" onclick="setCarSort('${k}')">${esc(label)}` +
           `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
       };
+      // A reason cell is a count and its share of the carrier's claims. The
+      // remainder column is printed thin so it reads as "what is left over"
+      // rather than as a sixth kind of courier failure.
+      const reasonCell = (k, n, claims) =>
+        `<td class="n rs"><b${k === 'none' ? ' class="thin"' : ''}>${num(n)}</b><span class="mu" style="font-size:11px">${pct(n, claims)}</span></td>`;
       const body = sorted.map((c) => {
         const [name, claims, orders, open, openCredit, credit, damage, med, p90, timed] = c;
         const both = name === 'UPS/FedEx';
         const openRate = pnum(open, claims);
         const tip = `${claims} claims against ${orders} orders · ${pct(open, claims)} still open` +
           (both ? ' · names both carriers in the same claim, so it is not filed under either' : '');
+        // The reason split in the tooltip, so hovering a row answers "which of
+        // these is the courier's fault" without reading six columns across.
+        const whyTip = CARRIER_COLS
+          .filter(([k]) => CARRIER_WHY[k])
+          .map(([k]) => `${CARRIER_COLS.find(([kk]) => kk === k)[1]} ${num(c[CARRIER_KEY[k]])}`)
+          .join(' · ');
         return `<tr onclick="jump('ca','${esc(name)}')" tabindex="0"
             onkeydown="if(event.key==='Enter'||event.key===' '){jump('ca','${esc(name)}');return false}"
-            title="${esc(tip)}">
+            title="${esc(tip + ' · ' + whyTip)}">
           <td class="name">${esc(name)}${both ? ' <span class="mu" style="font-size:11px">(both named)</span>' : ''}</td>
           <td class="n"><b>${num(claims)}</b><span class="mb"><i style="width:${pnum(claims, maxC).toFixed(1)}%"></i></span></td>
           <td class="n"><b>${num(open)}</b><span class="mu" style="font-size:11px">${openRate.toFixed(1)}%</span>
             <span class="mb"><i style="width:${Math.min(100, openRate).toFixed(1)}%"></i></span></td>
-          <td class="n"><b>${num(damage)}</b><span class="mu" style="font-size:11px">${pct(damage, claims)}</span></td>
+          ${CARRIER_COLS.filter(([k]) => CARRIER_WHY[k]).map(([k]) => reasonCell(k, c[CARRIER_KEY[k]], claims)).join('')}
           <td class="n"><b>${usd(credit)}</b><span class="mb"><i style="width:${pnum(credit, maxV).toFixed(1)}%"></i></span></td>
           <td class="n"><b>${timed ? p90.toFixed(1) + 'd' : '—'}</b><span class="mu" style="font-size:11px">${timed ? 'median ' + med.toFixed(1) + 'd' : 'no closed claims'}</span></td>
         </tr>`;
@@ -1238,7 +1280,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
               ? cf.reduce((a, c) => a + c[1], 0) + ' of ' + num(S.total) + ' claims name a carrier (' +
                 pct(cf.reduce((a, c) => a + c[1], 0), S.total) + ' of claims raised)'
               : 'No claims name a carrier this year'} · the export has no Carrier column, so it is read
-              from the department, claim type and description · no claim rate, because the export
+              from the department, claim type and description · the six reason columns are a
+              breakdown of Claims, not six extra claims: each claim is counted against one reason or
+              against "not a carrier fault", so they add up · no claim rate, because the export
               lists only orders that raised a claim, so the denominator would be the numerator
               · click a row to open its cases</span>
           </div>

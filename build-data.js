@@ -542,22 +542,81 @@ function carrierOf(c) {
 }
 for (const c of claims) c.carrier = carrierOf(c);
 
-// The claims that a carrier can be responsible for at all: damage, loss and
-// non-delivery, plus wrong-carrier-billing. Everything else named in the text
-// is a shipping account number or a rate quote, not a carrier failure.
-const CARRIER_DAMAGE = /product damage|missing|not shipped|wrong item|shortage|did not ship|deliver on time|lost|did not deliver/i;
+// Why a carrier claim was raised. These were one over-broad regex - "Damage or
+// loss" - that matched damage, loss, wrong item AND late delivery, so a courier
+// that lost parcels and a courier that ran late scored identically. It is split
+// into named reasons here, and they are what the scorecard's reason columns show.
+//
+// Ordered, and the first match wins, so the reasons PARTITION the carrier claims:
+// a claim is counted against exactly one reason and the row can be read as a
+// breakdown. Order is the argument, not the listing - "Order Was Lost During
+// Shipping" is loss, but "Items Missing/Not Shipped" is late because the words
+// are checked in this order and it matches on "not shipped" first.
+//
+//   late       the shipment did not move or arrive when it was promised
+//   loss       it went missing in the network
+//   damage     it arrived broken
+//   wrongItem  the wrong goods, or the wrong quantity of them
+//   account    the shipping account, method, label or address was wrong
+//   freight    freight or packaging was calculated or applied wrongly
+//
+// late and loss genuinely overlap in the source wording - "never received" is
+// both - so the split is a judgement, made once and stated here rather than
+// silently. What is left over after all six is deliberately not a reason:
+// "Wrong Price" and "Customer Denied Charges" name a carrier in their text but
+// are billing disputes, and a scorecard that scored a courier for them would be
+// wrong. That remainder is reported as its own column.
+const CARRIER_REASONS = [
+  ['late', /did not ship|not ship on time|deliver on time|did not deliver|ship date requested|late|not delivered|never arrived|never received|not received/i],
+  ['loss', /lost|missing|shortage|short shipped|did not arrive|not arrived/i],
+  ['damage', /product damage|damaged|damages|broken|cracked|chipped|smashed/i],
+  ['wrongItem', /wrong item|wrong items|wrong quantity|incorrect item|wrong colour|wrong color|wrong art/i],
+  ['account', /shipping account|shipping acct|shipper account|shipping method|shipping label|shipping address/i],
+  ['freight', /freight|miscalcuation|miscalculation|incorrect packaging|packaging info|pallet|accessorial/i]
+];
+const CARRIER_REASON_KEYS = CARRIER_REASONS.map(([k]) => k);
 
-// [name, claims, orders, open, openCredit, credit, damageClaims,
-//  medianDays, p90Days, timedCloses]
+// A claim is read against its ClaimType. The type is the raiser's own statement
+// of the reason and is never second-guessed by the prose. Only when the type says
+// nothing - 524 of the 1,640 carrier claims, a third of them - does the
+// description stand in for it, because otherwise those claims would fall into the
+// no-reason bucket purely for want of a typed reason.
+const reasonText = (c) => (c.type === '(Unclassified)' ? c.desc : c.type);
+
+function carrierReason(c) {
+  const text = reasonText(c);
+  for (const [k, re] of CARRIER_REASONS) if (re.test(text)) return k;
+  return '';
+}
+
+// 'Damage or loss' as the scorecard prints it: the two reasons that mean the
+// goods did not arrive intact. Kept as one column because that is the number the
+// scorecard has always shown, and it is now honest about what it includes - the
+// old regex also swept up late delivery, so the figure changes on purpose.
+const isDamageOrLoss = (k) => k === 'damage' || k === 'loss';
+
+// [name, claims, orders, open, openCredit, credit, damageOrLoss,
+//  medianDays, p90Days, timedCloses,
+//  late, wrongItem, account, freight, noReasonStated]
+//
+// The reason counts are APPENDED, not inserted. The scorecard's sort map is a
+// lookup of hard-coded tuple indices and seven of them sit at 0, 1, 3, 5, 6 and
+// 8; splicing reasons in at 7 would renumber p90 and silently sort the timing
+// column by the wrong figure. Appending leaves every existing index where it is.
 function carrierFacts(list) {
   const m = new Map();
   for (const c of list) {
     if (!c.carrier) continue;
-    if (!m.has(c.carrier)) m.set(c.carrier, { name: c.carrier, claims: 0, credit: 0, open: 0, openCredit: 0, damage: 0, orders: new Set(), spans: [] });
+    if (!m.has(c.carrier)) m.set(c.carrier, {
+      name: c.carrier, claims: 0, credit: 0, open: 0, openCredit: 0, damage: 0,
+      orders: new Set(), spans: [],
+      reasons: Object.fromEntries(CARRIER_REASON_KEYS.map((k) => [k, 0])), none: 0
+    });
     const e = m.get(c.carrier);
     e.claims++;
     e.credit = r2(e.credit + c.credit);
-    if (CARRIER_DAMAGE.test(c.type)) e.damage++;
+    const why = carrierReason(c);
+    if (why) { e.reasons[why]++; if (isDamageOrLoss(why)) e.damage++; } else e.none++;
     if (c.status === 'Open') { e.open++; e.openCredit = r2(e.openCredit + c.credit); }
     if (c.order) e.orders.add(c.order);
     if (c.resolved && c.rdate && c.date) e.spans.push((new Date(c.rdate) - new Date(c.date)) / 86400000);
@@ -565,7 +624,11 @@ function carrierFacts(list) {
   return [...m.values()].map((e) => {
     e.spans.sort((a, b) => a - b);
     const q = (f) => (e.spans.length ? r2(e.spans[Math.min(e.spans.length - 1, Math.floor(e.spans.length * f))]) : 0);
-    return [e.name, e.claims, e.orders.size, e.open, e.openCredit, e.credit, e.damage, q(0.5), q(0.9), e.spans.length];
+    return [
+      e.name, e.claims, e.orders.size, e.open, e.openCredit, e.credit, e.damage,
+      q(0.5), q(0.9), e.spans.length,
+      e.reasons.late, e.reasons.wrongItem, e.reasons.account, e.reasons.freight, e.none
+    ];
   }).sort((a, b) => b[1] - a[1]);
 }
 
@@ -585,6 +648,17 @@ for (const o of OWNERS) CARRIER_FACTS.all[o.id] = carrierFacts(claims.filter((c)
 console.log('carrier rows:', Object.values(CARRIER_FACTS).reduce((s, m) => s + m.all.length, 0),
   '| claims carrying a carrier name:', claims.filter((c) => c.carrier).length, 'of', claims.length,
   '| ambiguous UPS/FedEx:', claims.filter((c) => c.carrier === 'UPS/FedEx').length);
+
+// The reason columns are only readable as a breakdown if they add up to the
+// claims column. Checked here rather than asserted in a comment: if a regex is
+// retuned and one claim starts matching two reasons, the row silently stops
+// reconciling and the build says nothing.
+{
+  const rows = CARRIER_FACTS.all.all;
+  const bad = rows.filter((r) => r[6] + r[10] + r[11] + r[12] + r[13] + r[14] !== r[1]);
+  console.log('carrier reason split reconciles?', bad.length ? 'NO -> ' + bad.map((b) => b[0]).join(', ') : 'yes',
+    '|', rows.map((r) => `${r[0]} dmg/loss ${r[6]} late ${r[10]} wrong ${r[11]} acct ${r[12]} frt ${r[13]} none ${r[14]} of ${r[1]}`).join(' | '));
+}
 
 // ---------------------------------------------------------------- scoped blocks
 // The main year blocks are cut by owner only, so a page cannot repoint a figure
@@ -900,6 +974,12 @@ out.push('// Per-department rates, so cost and open-rate can be compared per tea
 out.push('// Keyed by year (or "all"), then by the owner the department routes to.');
 out.push('// [dept, owner, area, claims, orders, open, credit, openCredit, creditIssued, repeatOrders, noCredit]');
 out.push('const DEPT_FACTS = ' + J(DEPT_FACTS) + ';');
+// [name, claims, orders, open, openCredit, credit, damageOrLoss, medianDays,
+//  p90Days, timedCloses, late, wrongItem, account, freight, noReasonStated]
+// The four named reasons plus noReasonStated partition the row's claims: each
+// claim is counted against one reason or against "no reason stated", never two.
+// damageOrLoss is the union of the damage and loss reasons, kept as one column
+// because that is the figure the scorecard has always shown.
 out.push('const CARRIER_FACTS = ' + J(CARRIER_FACTS) + ';');
 out.push('');
 // Claims per warehouse, for the dashboard\'s warehouse pie. Scoped like

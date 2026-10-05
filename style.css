@@ -413,6 +413,10 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ctable td.n b.hi{color:var(--er)}
 /* A rate off a base too small to read: present, but not dressed as a verdict. */
 .ctable td.n b.thin{color:var(--mu);font-weight:500}
+/* The carrier scorecard's six reason columns are counts and a share, with no
+   meter under them, so they need far less room than the 132px measure columns -
+   which carry a bar. At 132px each the six alone would be wider than the card. */
+.ctable td.n.rs{width:96px}
 .ctable .mb{display:block;height:4px;margin-top:5px;border-radius:3px;background:var(--bd);overflow:hidden}
 .ctable .mb i{display:block;height:100%;border-radius:3px;background:var(--pr);transition:width .25s}
 .ctable .mb i.hi{background:var(--er)}

@@ -387,9 +387,33 @@ The same table shape, for carriers, read from `CARRIER_FACTS`.
 | Carrier | `UPS`, `FedEx` or `UPS/FedEx` — derived, see below |
 | Claims | claims naming that carrier |
 | Open | still open, with the open rate beneath it |
-| Damage or loss | claims whose `ClaimType` is damage, missing, not shipped, wrong item, shortage or non‑delivery |
+| Damage or loss | arrived broken, or went missing in the network |
+| Late or not delivered | did not ship, deliver or arrive when it was promised |
+| Wrong item or qty | wrong goods, or the wrong quantity of them |
+| Shipping account or address | wrong shipping account, method, label or address |
+| Freight or packaging | freight or packaging calculated or applied wrongly |
+| Not a carrier fault | names a courier, but the stated reason is none of the above |
 | Credit | `sum(CreditAmount)` |
 | Slowest 10% closed in | `p90Days`, with the median beneath it |
+
+The six reason columns are a **breakdown of Claims, not six extra claims**. `build-data.js`
+matches each carrier claim against an ordered list of reasons, first match wins, so a claim is
+counted against exactly one reason — or against *not a carrier fault*, which is the remainder and
+makes the six add up to `Claims`. The build asserts that (`carrier reason split reconciles?`) so a
+retuned regex cannot quietly make the row stop reconciling. Each header carries a tooltip saying
+what its reason covers.
+
+Two judgement calls are stated rather than hidden:
+
+- **`late` and `loss` overlap in the source wording.** "never received" is both. The split is made
+  once, in the order the reasons are listed, and the order is the argument — not alphabetical, not
+  by frequency.
+- **`Not a carrier fault` is the largest single reason for `UPS`** — 343 of its 923 claims. Read
+  those claims and they are billing and communication disputes (*Wrong Price*, *Customer Denied
+  Charges*, *Charged For Service Not Given*), product faults, and claims that name a courier in
+  passing. They belong on the scorecard precisely because the courier is named on them and would
+  otherwise be scored for a fault that is not its own. The column is printed muted so it does not
+  read as a peer of the five real reasons.
 
 ### The export has no Carrier column
 
@@ -615,10 +639,26 @@ claims up front. Each entry is a positional array; only carriers named in the sl
 | 3 | `open` | Claims still open |
 | 4 | `openCredit` | Credit on the still‑open claims |
 | 5 | `credit` | `sum(CreditAmount)` |
-| 6 | `damage` | Claims whose `ClaimType` is damage, missing, not shipped, wrong item, shortage or non‑delivery |
+| 6 | `damage` | **Damage or loss** — arrived broken, or went missing. The union of the `damage` and `loss` reasons |
 | 7 | `medianDays` | Median days to close |
 | 8 | `p90Days` | 90th percentile days to close |
 | 9 | `timed` | How many of these claims had both dates, so the percentiles are readable as a base |
+| 10 | `late` | **Late or not delivered** |
+| 11 | `wrongItem` | **Wrong item or qty** |
+| 12 | `account` | **Shipping account or address** |
+| 13 | `freight` | **Freight or packaging** |
+| 14 | `none` | **Not a carrier fault** — the remainder |
+
+6 + 10 + 11 + 12 + 13 + 14 = `claims`, always; the build fails loudly if it does not.
+
+The reason counts are **appended at 10–14, not inserted at 7.** The scorecard's sort map is a
+lookup of hard‑coded indices and seven of them sit at 0, 1, 3, 5, 6 and 8; splicing reasons in at 7
+would renumber `p90Days` to 8 and silently sort the timing column by the wrong figure.
+
+A claim is read against its `ClaimType`, never re‑read against the prose — the type is the raiser's
+own statement of the reason. Only the 524 carrier claims whose type is blank (a third of the 1,640)
+fall back to `ClaimDescription`, because otherwise they would land in the remainder for want of a
+typed reason rather than for want of a reason.
 
 Derivation and the 1,640 / 353 counts are in [§6](#6-carrier-scorecard).
 
