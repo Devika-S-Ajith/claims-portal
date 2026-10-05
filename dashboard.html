@@ -596,13 +596,38 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       );
     }
 
-    function vbarFixed(data, heightIdx, valueIdx, f) {
-      const max = Math.max(...data.map((d) => d[heightIdx]), 1);
+    // Bar height scales to the same figure printed above the bar, so the
+    // tallest bar is always the largest number. It used to scale the height by
+    // claim COUNT while the label showed credit, which put the biggest figure
+    // on the shortest bar: in 2026 '>$500' carried $290,313 but only 228 claims,
+    // so it drew as the smallest bar while '<$50' drew as the largest.
+    //
+    // Heights are a percentage of the .vb box, not pixels. The old code fed the
+    // output of pnum() - which returns 0-100 - into a px value, capping the
+    // tallest bar at 100px inside a 150px box and leaving it squashed.
+    //
+    // BAR_MAX is the share of the box the tallest bar may take; the remainder is
+    // left free for the value and the band name so neither overflows. 70 leaves
+    // enough headroom for the band name to wrap to two lines on a narrow screen.
+    const BAR_MAX = 70;
+
+    function vbarFixed(data, valueIdx, f) {
+      const val = (d) => Math.abs(d[valueIdx] || 0);
+      // peak is the real maximum, kept separate from max: max carries a floor of
+      // 1 so a divide-by-zero cannot happen when every value is 0, but it must
+      // not decide who wins, or an all-zero chart would crown an arbitrary bar.
+      const peak = Math.max(...data.map(val));
+      const max = Math.max(peak, 1);
+      // Every bar holding the peak is drawn red, so a tie never crowns an
+      // arbitrary winner.
+      const isTop = (d) => peak > 0 && val(d) === peak;
       return (
         `<div class="vb">` +
         data.map((d) => {
-          const v = d[heightIdx];
-          return `<div><em>${f(d[valueIdx])}</em><span style="height:${Math.max(3, pnum(v, max)).toFixed(1)}px"></span><label>${esc(d[0])}</label></div>`;
+          const h = Math.max(2, (val(d) / max) * BAR_MAX).toFixed(1);
+          const bar = isTop(d) ? ' class="top"' : '';
+          return `<div><em>${f(d[valueIdx])}</em>` +
+            `<span${bar} style="height:${h}%"></span><label>${esc(d[0])}</label></div>`;
         }).join('') +
         `</div>`
       );
@@ -1092,6 +1117,22 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
 
       const memoGap = df.reduce((a, d) => a + (d[6] - d[8]), 0);
 
+      // Caption for the credit bands. It used to read "762 of 4,254 cost
+      // nothing", which was a near-duplicate of the "Still open" stat already in
+      // the line above - see the note on RATES below - and it counted claims
+      // while the bars measure credit. This one reads the chart instead: it
+      // names the band carrying the most money, which is the bar drawn in red,
+      // and puts it in share terms.
+      //
+      // The band figures sum to S.credit, the same "Credit given" total printed
+      // in the stat line above, so the denominator reconciles with it rather
+      // than introducing a second version of the year's money.
+      // Captions the band holding the most credit. It compares absolute values for
+      // the same reason vbarFixed does, so the band named here is always the one
+      // drawn in red even if the export ever carries a negative credit.
+      const distSum = S.dist.reduce((a, d) => a + d[2], 0);
+      const topBand = S.dist.length ? S.dist.reduce((a, d) => (Math.abs(d[2]) >= Math.abs(a[2]) ? d : a)) : null;
+
       // The third column is a ratio the reader picks. Each entry says what to
       // divide by what, and fmt says how the result is written - two of these
       // are percentages and one is money per claim, so the unit cannot be
@@ -1217,10 +1258,10 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           </div>
           <div class="card">
             ${cardTitle('How big are the claims', '')}
-            ${S.dist.length ? vbarFixed(S.dist, 1, 2, usd) : '<p class="mu">No credited claims.</p>'}
-            <div class="row" style="margin-top:10px">
-              <span class="mu" style="font-size:12px">${num(S.noCredit)} of ${num(S.total)} cost nothing (${pct(S.noCredit, S.total)})</span>
-            </div>
+            ${S.dist.length ? vbarFixed(S.dist, 2, usd) : '<p class="mu">No credited claims.</p>'}
+            ${topBand ? `<div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${esc(topBand[0])} alone carries <b>${pct(topBand[2], distSum)}</b> of the ${usd(distSum)} credited in ${esc(year)}.</span>
+            </div>` : ''}
           </div>
         </div>
 
