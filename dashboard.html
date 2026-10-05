@@ -531,7 +531,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         const wide = +(TL.w - TL.r - from).toFixed(1);
         const mid = +(from + (TL.w - TL.r) / 2).toFixed(1);
         band = `<rect class="gap" x="${from}" y="${TL.t}" width="${wide}" height="${ph}"/>` +
-          (wide > 74 ? `<text class="gapx" x="${mid}" y="${TL.t + 10}" text-anchor="middle">no data yet</text>` : '');
+          '';
       }
 
       const grid = [];
