@@ -156,13 +156,15 @@ tr.hit td{font-weight:500}
 .hb b{text-align:right;font-size:12px;white-space:nowrap}
 .hb:hover .trk span{filter:brightness(1.12);box-shadow:0 0 0 2px rgba(99,102,241,.35)}
 svg.donut circle{transition:stroke-width .15s}
-.vb{display:flex;align-items:stretch;gap:10px;height:150px}.vb div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;font-size:11px;color:var(--mu);border-radius:8px 8px 0 0;padding:4px 2px 0;transition:background .2s}
+.vb{display:flex;align-items:stretch;gap:10px;height:180px}.vb div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;font-size:11px;color:var(--mu);border-radius:8px 8px 0 0;padding:4px 2px 0;transition:background .2s}
 .vb div:hover{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .vb em{font-style:normal;font-weight:600;font-size:11px;color:var(--tx);white-space:nowrap}
 .vb span{display:block;width:100%;max-width:56px;background:linear-gradient(180deg,#8b93f8,var(--pr));border-radius:6px 6px 0 0;transition:.2s}
 .vb label{text-align:center;line-height:1.25}
 .vb:hover span{opacity:.5}
 .vb div:hover span{opacity:1;filter:brightness(1.1);box-shadow:0 0 0 2px rgba(99,102,241,.4)}
+.vb span.top{background:linear-gradient(180deg,color-mix(in srgb,var(--er) 62%,#fff),var(--er));box-shadow:0 0 0 1px color-mix(in srgb,var(--er) 32%,transparent)}
+.vb div:hover span.top{box-shadow:0 0 0 2px color-mix(in srgb,var(--er) 48%,transparent)}
 svg.trend circle.pt{transition:opacity .2s,r .15s;cursor:pointer}
 svg.trend:hover circle.pt{opacity:.45}
 svg.trend circle.pt:hover{opacity:1;r:5;filter:drop-shadow(0 0 3px rgba(99,102,241,.6))}

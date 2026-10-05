@@ -447,7 +447,7 @@ than depending on chance.
 | Chart | Measure |
 |---|---|
 | Credit by department | `sum(CreditAmount)` per department, top 8, with an Amount / Percent toggle over the same bars |
-| How big are the claims | Claims per credit band — exactly three: `<$50`, `$50‑$500`, `>$500`. Bar height = claims, label = credit in the band. **The three bands sum exactly to `credited` and to `credit`**, so the chart always reconciles with the Credit given figure in the stat line at the top of the page. |
+| How big are the claims | Credit per credit band — exactly three: `<$50`, `$50‑$500`, `>$500`. Bar height **and** the figure above the bar both track credit in the band, so the tallest bar is always the largest number. Claim counts are deliberately not drawn here: this card answers "how big", not "how many". The tallest bar is drawn in red (`.vb span.top`), and ties all count as tallest. Heights are a percentage of the chart box, capped at `BAR_MAX = 70`% so the value and band name always fit. **The three bands sum exactly to `credit`**, so the chart always reconciles with the Credit given figure in the stat line at the top of the page. The sub-line replaced a "762 of 4,254 cost nothing" caption, which counted claims (not credit) and near-duplicated the "Still open" stat above; it now names the red band and its share of the year's credit. |
 
 **One credit chart, not two.** The old pair chart drew `sum(CreditAmount)` and
 `sum(abs(CreditMemoAmount))` as two bars per department, read off the same `DEPT_FACTS` credit

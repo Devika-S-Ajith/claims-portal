@@ -165,11 +165,21 @@
         `<b>${f(d[i])}</b></div>`).join('');
     }
 
-    function vbar(data, heightIdx, valueIdx, f) {
-      const max = Math.max(...data.map((d) => d[heightIdx]), 1);
+    // Mirrors vbarFixed in dashboard.html: height tracks the printed figure, the
+    // tallest bar is drawn in red via .vb span.top, and heights are a percentage
+    // of the .vb box rather than pnum() output mistaken for pixels.
+    const BAR_MAX = 70;
+
+    function vbar(data, valueIdx, f) {
+      const val = (d) => Math.abs(d[valueIdx] || 0);
+      const peak = Math.max(...data.map(val));
+      const max = Math.max(peak, 1);
+      const isTop = (d) => peak > 0 && val(d) === peak;
       return `<div class="vb">` + data.map((d) => {
-        const v = d[heightIdx];
-        return `<div><em>${f(d[valueIdx])}</em><span style="height:${Math.max(3, pnum(v, max)).toFixed(1)}px"></span><label>${esc(d[0])}</label></div>`;
+        const h = Math.max(2, (val(d) / max) * BAR_MAX).toFixed(1);
+        const bar = isTop(d) ? ' class="top"' : '';
+        return `<div><em>${f(d[valueIdx])}</em>` +
+          `<span${bar} style="height:${h}%"></span><label>${esc(d[0])}</label></div>`;
       }).join('') + `</div>`;
     }
 
