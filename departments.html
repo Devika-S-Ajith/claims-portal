@@ -27,7 +27,6 @@
     .whc.top{background:color-mix(in srgb,var(--pr) 4%,var(--card))}
     .whc .whr{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--pr-d)}
     .whc .whk{font-size:21px;line-height:1.05}
-    .whc .whn{font-size:11.5px;color:var(--mu);min-height:2.6em}
     .whc .whbig{font-size:16px;font-weight:600;margin-top:2px}
     .whc .whbig em{font-style:normal;font-size:11px;font-weight:400;color:var(--mu);margin-left:4px}
     .whc .whshare{font-size:11px;color:var(--mu)}
@@ -110,10 +109,8 @@
     // A manager is only offered the departments routed to them.
     const myDepts = () => (isAdmin() ? DEPT_INDEX : DEPT_INDEX.filter((d) => canSee(d[3])));
 
-    const WH_NAME = (W) => {
-      const r = WAREHOUSES.find((w) => w[0] === W);
-      return r ? r[1] : 'Unknown site';
-    };
+    // A site code is its own name, so this only guards against a stale focus.
+    const WH_NAME = (W) => (WAREHOUSES.includes(W) ? W : 'Unknown site');
 
     // Months with data in the selected year. Taken from the company block, never
     // from the department: a department with no claims in September would
@@ -241,9 +238,9 @@
     // orders shipped) - so this is a share of all claims, not a true defect
     // rate. Labelled as such rather than dressed up as a percentage of goods.
     function whRank(y) {
-      const rows = WAREHOUSES.map(([w, name]) => {
+      const rows = WAREHOUSES.map((w) => {
         const b = SCOPED_STATS[y] && SCOPED_STATS[y]['wh:' + w];
-        return { w, name, b, n: b ? b.total : 0, credit: b ? b.credit : 0 };
+        return { w, b, n: b ? b.total : 0, credit: b ? b.credit : 0 };
       });
       const all = block('all', y);
       rows.forEach((r) => { r.share = all.total ? pnum(r.n, all.total) : 0; });
@@ -269,8 +266,7 @@
         const openPct = r.n ? pnum(wBlock.unresolved, r.n) : 0;
         return `<button class="whc${i === 0 ? ' top' : ''}" onclick="setWh('${r.w}')" aria-pressed="${whFocus === r.w}">
           <span class="whr">${i === 0 ? 'Most defects' : 'Rank ' + (i + 1)}</span>
-          <b class="whk">${r.w}</b>
-          <span class="whn">${esc(r.name)}</span>
+          <b class="whk">${esc(r.w)}</b>
           <span class="whbig">${num(r.n)}<em>claims</em></span>
           <span class="whshare">${r.share.toFixed(1)}% of all ${year} claims</span>
           <span class="whmeter"><i style="width:${pnum(r.n, top.n || 1).toFixed(1)}%"></i></span>
@@ -278,9 +274,9 @@
           <span class="whex">${r.n ? `${openPct.toFixed(1)}% still open` : 'No claims'}</span>
         </button>`;
       }).join('') + `</div>
-        <p class="mu" style="margin-top:12px">Warehouses are mock A–F values from the export's
-        <code>Warehouse</code> column, not a real site feed, and the export has no unit counts -
-        so these are shares of all claims, not defect rates against goods handled.</p>`;
+        <p class="mu" style="margin-top:12px">The export has no site feed, so the split across these
+        warehouses is mocked from its <code>Warehouse</code> column, and it carries no unit counts - so these
+        are shares of all claims, not defect rates against goods handled.</p>`;
     }
 
     // The department's own warehouse split, with the clicked site highlighted.
@@ -289,7 +285,7 @@
       const mine = rows.filter((r) => r.dn);
       if (!mine.length) return `<p class="mu">Nothing in ${esc(dept === 'all' ? 'this year' : dept)} came from a warehouse this year.</p>`;
       const top = mine[0].dn;
-      return hbar(mine.map((r) => [`${r.w} · ${r.name}`, r.dn]), 1).replace(/class="hb"/g, 'class="hb whb"') +
+      return hbar(mine.map((r) => [r.w, r.dn]), 1).replace(/class="hb"/g, 'class="hb whb"') +
         `<p class="mu" style="margin-top:10px">Where this department's ${year} claims came from.
         ${whFocus ? `${esc(WH_NAME(whFocus))} holds ${num(mine.find((r) => r.w === whFocus)?.dn || 0)} of them.` : ''}</p>`;
     }
@@ -522,7 +518,7 @@
             <span class="mu">${esc(S.range)} · ${num(S.total)} claims · ${usd(S.credit)}${d[3] ? ' · ' + esc(ownerName(d[3])) : ''}</span>
           </div>
           <div class="sp"></div>
-          <span class="b Med">Warehouses are mock A–F values</span>
+          <span class="b Med">Warehouse split is mocked</span>
         </div>
 
         <div class="card" style="margin-top:14px">
@@ -565,7 +561,7 @@
           </div>
           <div class="card">
             ${cardTitle('Share of all claims', `Warehouse against the ${year} total`)}
-            ${hbar(whRank(year).rows.map((r) => [`${r.w} · ${r.name}`, r.share]), 1)}
+            ${hbar(whRank(year).rows.map((r) => [r.w, r.share]), 1)}
             <p class="mu" style="margin-top:10px">A share, not a defect rate: the export has no units
             stored or orders shipped per site.</p>
           </div>

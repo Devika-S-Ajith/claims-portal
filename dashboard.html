@@ -258,7 +258,6 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       const total = rows.reduce((a, d) => a + d[1], 0);
       if (!total) return '<p class="mu">No claims in this year.</p>';
       const color = (n) => COLORS[n % COLORS.length];
-      const nameOf = (w) => (WAREHOUSES.find((x) => x[0] === w) || [w, 'Unknown site'])[1];
 
       // Same gap treatment as the status ring: taken out of each arc's length
       // rather than added, so the arcs still total 100% and nothing drifts out
@@ -268,19 +267,22 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       const arcs = rows.map((d, n) => {
         const p = (d[1] / total) * 100;
         const draw = Math.max(p - GAP, Math.min(p, 0.35));
-        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${color(n)}" stroke-width="6" stroke-dasharray="${draw.toFixed(2)} ${(100 - draw).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"><title>${esc(nameOf(d[0]))}: ${num(d[1])} claims (${p.toFixed(1)}%)</title></circle>`;
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${color(n)}" stroke-width="6" stroke-dasharray="${draw.toFixed(2)} ${(100 - draw).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"><title>Warehouse ${esc(d[0])}: ${num(d[1])} claims (${p.toFixed(1)}%)</title></circle>`;
         offset -= p;
         return arc;
       }).join('');
 
       // Same row shape as the status breakdown: swatch, name, count, share, bar.
-      // The site code leads because the full names are long and would otherwise
-      // be the part that gets truncated.
+      // The site code is the whole name, so it is the only label on the row - and
+      // a four-character code left the count sitting 8px away at the same weight,
+      // so "8825  2,988" read as one string. The row carries .whd, which pushes
+      // the code to the left edge and the two figures to the right, so the label
+      // and the measures are two separate groups rather than one run of digits.
       const rows_ = rows.map((d, n) => `
-          <div class="drow">
+          <div class="drow whd">
             <div class="dline">
-              <span class="dlbl"><i style="background:${color(n)}"></i><b class="wk">${esc(d[0])}</b><span class="wn" title="${esc(nameOf(d[0]))}">${esc(nameOf(d[0]))}</span></span>
-              <b>${num(d[1])}</b><em>${pnum(d[1], total).toFixed(1)}%</em>
+              <span class="dlbl"><i style="background:${color(n)}"></i><b class="wk">${esc(d[0])}</b></span>
+              <b class="wcnt">${num(d[1])}</b><em>${pnum(d[1], total).toFixed(1)}%</em>
             </div>
             <div class="trk"><span style="width:${pnum(d[1], total).toFixed(1)}%;background:${color(n)}"></span></div>
           </div>`).join('');
@@ -304,9 +306,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
 
     function whPie() {
       return pie(whFacts()) + `
-        <p class="mu" style="margin:10px 0 0;font-size:12px">Warehouses are mock A&ndash;F values read from the
-        export's <code>Warehouse</code> column, and it carries no unit counts &mdash; so these are shares of
-        all claims, not defect rates against goods handled.</p>`;
+        <p class="mu" style="margin:10px 0 0;font-size:12px">The export has no site feed, so the split across
+        ${WAREHOUSES.length} warehouses is mocked from its <code>Warehouse</code> column, and it carries no unit
+        counts &mdash; these are shares of all claims, not defect rates against goods handled.</p>`;
     }
 
     // rowsFor the types list carry a stable id and their own type name, because

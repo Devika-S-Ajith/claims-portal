@@ -320,27 +320,30 @@ The nine **cannot be read from the export**: those columns hold `0` on all 31,52
 go to `OrderChange`, which is why it is 45% of the file. Routing is derived by counting each
 export owner's claims inside each department (`OWNER_OF_NINED`), not asserted by hand.
 
-**Warehouses are mocked.** A warehouse is where the product was sitting when the fault was
-found, so a warehouse holds one kind of stock and the **product family** decides the site — a
-print fault belongs to the print warehouse, not to the desk that logged it. `add-warehouse.js`
-assigns one from `ClaimType` (16,018 rows carry one, 110 distinct), falling back to keywords in
-`ClaimDescription`, then to a deterministic hash spread within the family.
+**Warehouses are mocked.** The portal reports on **four sites**, named by their code — `8825`,
+`1920`, `1780`, `WC`. A code is the whole label: the sites are known by number, so nothing is
+appended to it.
 
-| Warehouse | Holds |
-|---|---|
-| A | Main store — general goods |
-| B | Art & print |
-| C | Drinkware & fragile |
-| D | Finished goods & overflow |
-| E | Dispatch & courier |
-| F | Order desk & service |
+The export carries no site feed either. `add-warehouse.js` appends a `Warehouse` column of six
+letters (A–F) modelling where the product was sitting when the fault was found, on the same
+principle as above: a warehouse holds one kind of stock, so the product family decides the site —
+a print fault belongs to the print warehouse, not to the desk that logged it. Those six letters
+are folded onto the four real sites in `build-data.js`, keeping the family that drove each letter:
 
-This is a **mock**: replace the `Warehouse` column the moment a real site feed exists. It is
-deterministic — same input, same output, no randomness — so figures do not move between builds.
-Because the export has no unit counts, the page shows each site's **share of all claims**, never
-a defect rate; inventing a rate per site is the same mistake as the company-level one in §6.
+| Export letter | Modelled as | Reported as |
+|---|---|---|
+| A main store, F order desk | the store a claim came off | `8825` |
+| E dispatch & courier | dispatch | `1920` |
+| B art & print, C drinkware | printed goods | `1780` |
+| D finished goods & overflow | overflow store | `WC` |
 
-The six cards are ranked by claims, and the largest is labelled **Most defects**. Ranked by count
+This is a **mock**, twice over: replace both the letter column and the fold the moment a real site
+feed exists. The fold is fixed rather than hashed, so the same claim lands on the same site in
+every build and figures do not move between builds. Because the export has no unit counts, the page
+shows each site's **share of all claims**, never a defect rate; inventing a rate per site is the
+same mistake as the company-level one in §6.
+
+The four cards are ranked by claims, and the largest is labelled **Most defects**. Ranked by count
 because that is what the export supports — a share of claims, not a rate against goods handled.
 Each card also carries that site's top fault by credit, its open share, and a meter.
 
@@ -685,7 +688,7 @@ Other Scheduling` (all zero on every row), `Split` (empty), `SyncFlag` (always `
 | Root cause almost never filled | 3 of 31,235 | Cause analysis is impossible. The fields meant to carry it are empty: `RootCauseAnalysis` 3 values, `CorrectiveAction` 31, `PreventiveAction` 14, `ProposedSolution` 1 |
 | No assignee column | — | Ownership is modelled, see below |
 | No carrier column | 29,881 (94.8%) of claims name no carrier | A carrier is **derived** from `ClaimDept`, `ClaimType` and `ClaimDescription`, not read from a field — see §6. 1,640 claims name one, 353 of those name two. The scorecard covers only the 1,640 and says so, and a blank on the order pages means "not stated", never a guess |
-| No warehouse column | all 31,521 | `add-warehouse.js` appends a mock A–F `Warehouse` column (where the product sat when the fault was found) so the department page can rank sites. Mocked, not real: see §4.1 |
+| No warehouse column | all 31,521 | `add-warehouse.js` appends a mock A–F `Warehouse` column (where the product sat when the fault was found), which `build-data.js` then folds onto the four real site codes (`8825`, `1920`, `1780`, `WC`) so the department page can rank sites. Mocked, not real: see §4.1 |
 | Department columns empty | all 31,521 | `Art`, `Production`, `OrderChange`, `Shipping`, `Invoicing`, `Pricing`, `Overseas`, `CustomerService`, `Quoting` are the literal value `0` on every row. They are placeholders. The only populated department field is `ClaimDept`, 47 spellings, collapsed to the nine by `DEPT_MAP` |
 | No `Overseas` claims | 0 rows | Listed in the picker as required, and shown with an empty state rather than dropped |
 | Currency blank | 31,235 | No conversion is possible; every figure is as‑exported |

@@ -108,21 +108,30 @@ const DEPT_LABEL = Object.fromEntries(DEPARTMENTS);
 // and is left unassigned rather than given an invented owner.
 
 // ---------------------------------------------------------------- warehouse
-// The export carries no warehouse column either. `add-warehouse.js` appends one
-// (A-F) modelling where the product was sitting when the fault was found: a
-// warehouse holds one kind of stock, so the product family decides the site.
-// That is what makes "which warehouse had the most defects" a real question -
-// a print fault belongs to the print warehouse, not to the desk that logged it.
-// Overseas has no rows in this export; it is kept in DEPARTMENTS so the picker
-// matches the required list, and its block is simply empty.
-const WAREHOUSES = [
-  ['A', 'Main store - general goods'],
-  ['B', 'Art & print'],
-  ['C', 'Drinkware & fragile'],
-  ['D', 'Finished goods & overflow'],
-  ['E', 'Dispatch & courier'],
-  ['F', 'Order desk & service']
-];
+// The four sites the portal reports on, by code. A code is the whole label: the
+// sites are known by their number, so there is nothing to add after it and a
+// second column would only invite invented descriptions.
+const WAREHOUSES = ['8825', '1920', '1780', 'WC'];
+
+// The export has no real site feed either - `add-warehouse.js` appends a
+// Warehouse column of six letters (A-F) modelling where the product was sitting
+// when the fault was found, because a warehouse holds one kind of stock and the
+// product family decides the site. Those six letters are folded onto the four
+// real sites, keeping the family that drove each letter:
+//   A main store + F order desk -> 8825  (the store the claim came off)
+//   E dispatch & courier       -> 1920
+//   B art & print + C drinkware -> 1780
+//   D finished goods & overflow -> WC
+// The mapping is fixed, not hashed, so the same claim lands on the same site in
+// every build and the figures never move between runs. Replace this the moment a
+// real site feed exists - then the CSV column is read as-is and this map is
+// deleted.
+const WAREHOUSE_FROM_LETTER = {
+  A: '8825', F: '8825',
+  E: '1920',
+  B: '1780', C: '1780',
+  D: 'WC'
+};
 
 // Three coarse bands, which is all a reader needs to see: most claims are small
 // claims, and the money sits in the handful above $500. The finer five-band
@@ -170,7 +179,8 @@ const claims = rows.slice(1)
       // The export's own 47-spelling department, kept for the legacy per-dept
       // views on the claims dashboard, which still read `rawDept`.
       rawDept: dept || '(Unassigned)',
-      wh: g(r, 'Warehouse') || 'A',
+      // The export's mock A-F letter, folded onto one of the four real sites.
+      wh: WAREHOUSE_FROM_LETTER[g(r, 'Warehouse')] || WAREHOUSES[0],
       type: g(r, 'ClaimType') || '(Unclassified)',
       desc: g(r, 'ClaimDescription'),
       rca: g(r, 'RootCauseAnalysis'),
@@ -482,9 +492,9 @@ console.log('dept fact rows:', Object.values(DEPT_FACTS).reduce((s, m) => s + m.
 // draws claims from every department and therefore from every owner.
 // [warehouse, claims, credit] - one row per site, ranked by claims, and every
 // site in WAREHOUSES is listed even with no claims so the pie keeps a stable
-// six slices and an empty site is a visible zero rather than a missing wedge.
+// four slices and an empty site is a visible zero rather than a missing wedge.
 function whFacts(list) {
-  const m = new Map(WAREHOUSES.map(([w]) => [w, { claims: 0, credit: 0 }]));
+  const m = new Map(WAREHOUSES.map((w) => [w, { claims: 0, credit: 0 }]));
   for (const c of list) {
     if (!m.has(c.wh)) m.set(c.wh, { claims: 0, credit: 0 });
     const e = m.get(c.wh);
@@ -620,7 +630,7 @@ for (const y of YEARS) {
     // A department draws from several warehouses, so it has no single one: the
     // first claim's warehouse would be an accident. The company-wide block must
     // not claim one either - a page that reads scopeWh to filter would then show
-    // a sixth of the claims. The page reads `whs` (the ranked list) instead.
+    // a quarter of the claims. The page reads `whs` (the ranked list) instead.
     b.scopeWh = k.startsWith('wh:') ? name : '';
     b.scopeDept = k.startsWith('dept:') ? name : '';
     SCOPED_STATS[y][k] = b;
@@ -899,10 +909,9 @@ out.push('');
 out.push('const WH_FACTS = ' + J(WH_FACTS) + ';');
 out.push('');
 out.push('// ---- warehouses ----');
-out.push('// The export has no warehouse column. add-warehouse.js appends one (A-F)');
-out.push('// modelling where the product was sitting when the fault was found - a');
-out.push('// warehouse holds one kind of stock, so the product family decides the');
-out.push('// site. Replace this the moment a real warehouse feed exists.');
+out.push('// The four sites, by code. The export has no real site feed; its mock A-F');
+out.push('// Warehouse column is folded onto these codes in build-data.js. Replace');
+out.push('// both the moment a real feed exists.');
 out.push('const WAREHOUSES = ' + J(WAREHOUSES) + ';');
 out.push('// The nine departments the portal reports on, in fixed order.');
 out.push('const DEPARTMENTS = ' + J(DEPARTMENTS) + ';');

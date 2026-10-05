@@ -447,9 +447,19 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
    status card, so the two cards in this row are the same chart twice with
    different labels - which is the point. It used to be a filled pie with its own
    legend layout, so the row read as two different products. The .wpie legend
-   styles went with it; only the two name styles the shared rows need remain. */
+   styles went with it; the one style left is the site code, which is the whole
+   label on a warehouse row. */
 .dcard .dlbl b.wk{font-weight:700;line-height:1.2;flex:none}
-.dcard .dlbl span.wn{color:var(--mu);flex:1 1 auto;min-width:0}
+/* A warehouse label is a four-character code, not a sentence, so with the code
+   alone on the row the count landed 8px from it at the same weight and the pair
+   read as one number. .whd splits the row into a left label and a right figure
+   group: the code keeps the left edge, the count and the share go to the right,
+   and the count drops to 600 so it reads as a measure beside the code rather
+   than as more of the name. The count is right-aligned into its own column so
+   the two numbers line up down the card, and the wide gap after it keeps the
+   count and the share from reading as one figure. */
+.whd .dlbl{flex:1 1 auto}
+.whd .wcnt{font-weight:600;min-width:44px;text-align:right;margin-right:10px}
 
 /* ---- orders: pagination ---- */
 /* Page numbers, not row numbers: the last page holds whatever is left over and
