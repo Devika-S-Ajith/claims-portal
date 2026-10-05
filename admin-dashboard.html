@@ -170,7 +170,7 @@
           <td><span class="owner-chip ${(OWNERS.find((o) => o.id === r.own) || {}).role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(ownerName(r.own))}</span></td>
           <td>${r.am ? usd(r.am) : '<span class="mu">—</span>'}</td>
           <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
-          <td>${esc(r.date)}</td>
+          <td>${fmtDate(r.date)}</td>
         </tr>`;
     }
 

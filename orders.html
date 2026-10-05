@@ -194,7 +194,7 @@
                 <td>${o[3] ? `<span class="b Med">${num(o[3])}</span>` : '0'}</td>
                 <td>${usd(o[2])}</td>
                 <td>${num(o[4])}</td>
-                <td class="mu" style="font-size:11px">${esc(o[5])} → ${esc(o[6])}</td>
+                <td class="mu" style="font-size:11px">${esc(fmtDate(o[5]))} → ${esc(fmtDate(o[6]))}</td>
               </tr>`).join('')
               : `<tr><td colspan="8" class="mu">No orders match this filter.</td></tr>`}
           </table>
@@ -210,7 +210,7 @@
               <dt>Still open</dt><dd>${num(order[3])}</dd>
               <dt>Total credit</dt><dd>${usd(order[2])}</dd>
               <dt>Departments involved</dt><dd>${num(order[4])}</dd>
-              <dt>Claim window</dt><dd>${esc(order[5])} → ${esc(order[6])}</dd>
+              <dt>Claim window</dt><dd>${esc(fmtDate(order[5]))} → ${esc(fmtDate(order[6]))}</dd>
               <dt>Routed owners</dt><dd>${orderOwners(order).map((id) => {
                 const o = OWNERS.find((x) => x.id === id);
                 return o ? `<span class="owner-chip ${o.role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(o.name)}</span>` : esc(id);

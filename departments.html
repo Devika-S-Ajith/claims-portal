@@ -439,7 +439,7 @@
         <td>${statusBadge(r.st)}</td>
         <td>${r.am ? money(r.am) : '<span class="mu">—</span>'}</td>
         <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
-        <td>${esc(r.date).slice(0, 10)}</td></tr>`;
+        <td>${fmtDate(r.date)}</td></tr>`;
 
       const controls = `<div class="qbar">
         <div class="qsearch">

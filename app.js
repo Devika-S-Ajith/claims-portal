@@ -313,6 +313,22 @@ const badge = (s) => `<span class="b ${s.split(' ')[0]}">${s}</span>`;
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// Dates read MM-DD-YYYY. The export stores them as ISO strings, so one prefix
+// parser covers every shape in the data: '2014-08-22 00:00:00.000' (claim and
+// resolved dates, which carry a time part the pages never show), '2013-12-03'
+// (credit memo dates) and '' (claims with no date at all).
+//
+// Deliberately not toLocaleDateString: that follows the reader's locale, so the
+// same claim would print 08-22-2014 for one office and 22-08-2014 for the next.
+// The format is fixed here so every page prints a date the same way.
+//
+// Returns '' for a missing date, which is what the tables want. Pages that show
+// an em dash instead add it at the call site.
+function fmtDate(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d == null ? '' : d));
+  return m ? `${m[2]}-${m[3]}-${m[1]}` : '';
+}
+
 function ownerName(id) {
   const o = (typeof OWNERS !== 'undefined' && OWNERS.find((x) => x.id === id)) || null;
   return o ? o.name : 'Unassigned';

@@ -82,7 +82,10 @@
 
       const dd = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
       const or = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : v);
-      const fmtDate = (d) => (d ? esc(String(d).slice(0, 10)) : '—');
+      // The shared fmtDate (app.js) prints MM-DD-YYYY and returns '' when there
+      // is no date; this page shows an em dash for a missing value instead, to
+      // match how its other blank fields read.
+      const when = (d) => fmtDate(d) || '—';
 
       // Carrier is not a column in the export. build-data.js reads it out of the
       // claim's department, claim type and description, so a claim that never
@@ -119,8 +122,8 @@
           <h3>Claim at a glance</h3>
           ${chipGroup('pg', 'Progress', 'Where this claim sits, based on the Resolved / Denied / Cancelled flags in the export.', [
             ['Status', claim.st, 'k'],
-            ['Raised', fmtDate(claim.date), ''],
-            ['Resolved', claim.rdate ? fmtDate(claim.rdate) : '—', ''],
+            ['Raised', when(claim.date), ''],
+            ['Resolved', when(claim.rdate), ''],
             ['Entry finished', claim.entryFinished ? 'Yes' : 'No', claim.entryFinished ? '' : 'k']
           ])}
           ${chipGroup('is', 'Issue', 'What was claimed, and the department routed to own it.', [
@@ -134,7 +137,7 @@
             ['Claim credit', money(claim.am), 'money'],
             ['Credit memo', or(fin.creditMemo, 'Not raised'), 'v'],
             ['Memo amount', fin.creditMemoAmount ? money(fin.creditMemoAmount) : '—', 'money'],
-            ['Memo date', fmtDate(fin.creditMemoDate), ''],
+            ['Memo date', when(fin.creditMemoDate), ''],
             ['Credited against', or(fin.creditForInvoice, '—'), 'v']
           ])}
         </div>
@@ -145,7 +148,7 @@
               ${dd('Claim ID', claim.id)}
               ${dd('Order ID', claim.or ? `<a style="color:var(--pr)" href="orders.html">${esc(claim.or)}</a>` : '—')}
               ${dd('Order type', or(claim.otype, '—'))}
-              ${dd('Claim date', fmtDate(claim.date))}
+              ${dd('Claim date', when(claim.date))}
               ${dd('Description', esc(or(claim.ds, 'No description recorded.')))}
               ${dd('Claim type', esc(claim.ty))}
               ${dd('Department', esc(claim.de))}
