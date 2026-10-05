@@ -464,30 +464,27 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .pgap{color:var(--mu);font-size:12px;padding:0 1px;line-height:1}
 
 /* ---- dashboard: month-on-month comparison ---- */
-.mchart{position:relative;display:flex;flex-direction:column;margin-top:12px}
-.mcgrid{position:absolute;left:52px;right:0;top:30px;height:230px;pointer-events:none}
-.mcgrid i{position:absolute;left:0;right:0;border-top:1px dashed var(--bd)}
-.mcgrid i:last-child{border-top:1px solid var(--bd2)}
-.mcscl{position:absolute;left:0;width:44px;top:30px;height:230px}
-.mcscl span{position:absolute;right:0;transform:translateY(50%);font-size:11px;color:var(--mu);font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1}
-/* No y-axis variant: the bars reclaim the 52px the scale used to occupy, so
-   every bar carries its value and nothing needs a ruler down the side. */
-.mchart.noaxis .mcs{padding-left:0}
-.mcs{position:relative;display:flex;gap:6px;align-items:flex-end;padding-left:52px}
-.mg{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center}
-.mgs{position:relative;width:100%;height:230px;display:flex;align-items:flex-end;justify-content:center}
-.mgv{position:absolute;left:0;right:0;transform:translateY(-100%);margin-bottom:3px;text-align:center;font-size:11px;font-weight:600;color:var(--tx);font-variant-numeric:tabular-nums;line-height:1}
-.mbars{display:flex;gap:2px;align-items:flex-end;width:100%;max-width:56px;height:100%}
-.mbar{flex:1;min-height:2px;border-radius:4px 4px 0 0;transition:filter .2s,box-shadow .2s}
-.mbar.a{background:linear-gradient(180deg,#cfd3e4,#b3a49b)}
-.mbar.b{background:linear-gradient(180deg,#8b93f8,#6366f1)}
-.mg:hover .mbar.b{filter:brightness(1.08);box-shadow:0 0 0 2px rgba(99,102,241,.28)}
-.mg label{font-size:11px;color:var(--mu);margin-top:6px;line-height:1}
+.mchart{margin-top:12px}
+.mchart svg.trend{display:block;width:100%;height:auto;overflow:visible}
+.mchart .gl{stroke:var(--bd);stroke-width:1;stroke-dasharray:2 3}
+.mchart .gl.base{stroke:var(--bd2);stroke-dasharray:none}
+.mchart .tk{fill:var(--mu);font-size:7.5px;font-variant-numeric:tabular-nums}
+.mchart .mo{fill:var(--mu);font-size:8px}
+/* The part of the calendar the current year has no data for yet. Shading it is
+   what stops last year's tail reading as this year's drop. */
+.mchart .gap{fill:var(--mu);opacity:.07}
+.mchart .gapx{fill:var(--mu);font-size:7px;letter-spacing:.3px;text-transform:uppercase}
+.mchart .dl{font-size:7.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.mchart .dl.up{fill:var(--er)}
+.mchart .dl.dn{fill:var(--gn)}
+.mchart .dl.fl{fill:var(--mu)}
+.mchart .pv{fill:none;stroke:#b3a49b;stroke-width:2;stroke-dasharray:4 3;stroke-linejoin:round}
+.mchart .cu{fill:none;stroke:#6366f1;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
 .mgd{font-style:normal;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;margin-top:4px}
 .mgd.up{color:var(--er)}
 .mgd.dn{color:var(--gn)}
 .mgd.fl{color:var(--mu)}
-.mctot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:14px 0 0 52px;padding-top:10px;border-top:1px solid var(--bd);font-size:12px;color:var(--mu)}
+.mctot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:14px 0 0;padding-top:10px;border-top:1px solid var(--bd);font-size:12px;color:var(--mu)}
 .mctot span{display:flex;align-items:center;gap:5px}
 .mctot i{width:9px;height:9px;border-radius:3px;display:inline-block}
 .mctot b{color:var(--tx);font-variant-numeric:tabular-nums}

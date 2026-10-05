@@ -478,9 +478,8 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         </table></div>`;
     }
 
-    // Month-on-month, this year against the same months last year.
     // The scale is set by the tallest single MONTH, not by the annual total, and
-    // rounded to a readable step so the bars are sized against round numbers.
+    // rounded to a readable step so the line is read against round numbers.
     function niceScale(raw, steps) {
       const s = steps || 4;
       const rough = Math.max(raw, 1) / s;
@@ -490,41 +489,105 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       return { step, top: step * s };
     }
 
+    // Two series over one shared month axis, drawn as lines.
+    // This was twelve pairs of bars, which answers "is this month bigger than
+    // last month" and leaves "which way is the year heading" to the reader: with
+    // paired bars every month is a separate comparison and none of them join up.
+    // Joining them is the whole point of the comparison, so last year is a
+    // dashed line behind this year's solid one and the eye can follow both.
+    //
+    // The bars carried their own value on every column, which is why they needed
+    // no y-axis. A line cannot do that - the value belongs to the point, not to a
+    // column - so the scale comes back, with gridlines and the month-over-month
+    // change under each month so no readout is lost.
+    //
+    // The axis always runs the full twelve months so the two years sit on the
+    // same calendar and last year's whole shape is visible. The current year is a
+    // part year, so its line simply stops where its data stops and the months
+    // beyond are shaded: truncating the axis instead would hide that last year
+    // ran on past the point this year reached.
+    //
+    // Ticks, month names and the per-month delta are all drawn in SVG rather than
+    // in sibling HTML so they stay registered to the plotted points at any width.
+    const TL = { w: 340, h: 190, l: 40, r: 6, t: 10, b: 30 };
+    function trendline(cells, top, step, tick, tip) {
+      const n = cells.length;
+      const pw = TL.w - TL.l - TL.r;
+      const ph = TL.h - TL.t - TL.b;
+      const base = TL.t + ph;
+      const x = (i) => +(n > 1 ? TL.l + (i * pw) / (n - 1) : TL.l + pw / 2).toFixed(1);
+      const y = (v) => +(base - (v / top) * ph).toFixed(1);
+      const pts = (key, src) => src.map((d, i) => `${x(i)},${y(d[key])}`).join(' ');
+
+      // Where this year's data ends. The missing months are always the tail, so
+      // one pass for the first gap is enough.
+      const gap = cells.findIndex((d) => d.c === null);
+      const cut = gap === -1 ? n : gap;
+
+      // Shaded first, so it sits under the gridlines and both lines.
+      let band = '';
+      if (cut < n && n > 1) {
+        const from = x(cut - 1);
+        const wide = +(TL.w - TL.r - from).toFixed(1);
+        const mid = +(from + (TL.w - TL.r) / 2).toFixed(1);
+        band = `<rect class="gap" x="${from}" y="${TL.t}" width="${wide}" height="${ph}"/>` +
+          (wide > 74 ? `<text class="gapx" x="${mid}" y="${TL.t + 10}" text-anchor="middle">no data yet</text>` : '');
+      }
+
+      const grid = [];
+      for (let v = 0; v <= top + step / 2; v += step) {
+        const edge = v === 0;
+        grid.push(`<line class="gl${edge ? ' base' : ''}" x1="${TL.l}" y1="${y(v)}" x2="${TL.w - TL.r}" y2="${y(v)}"/>`);
+        grid.push(`<text class="tk" x="${TL.l - 6}" y="${y(v)}" text-anchor="end" dominant-baseline="middle">${tick(v)}</text>`);
+      }
+
+      const dots = [['c', cells.slice(0, cut)], ['p', cells]].map(([key, src]) => src.map((d, i) => {
+        const v = d[key];
+        return `<circle class="pt" cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${key === 'c' ? '#6366f1' : '#b3a49b'}">` +
+          `<title>${d.m} ${key === 'c' ? year : year - 1}: ${tip(v)}</title></circle>`;
+      }).join('')).join('');
+
+      const foot = cells.map((d, i) => {
+        const mo = `<text class="mo" x="${x(i)}" y="${base + 12}" text-anchor="middle">${d.m}</text>`;
+        if (d.c === null) return mo;
+        const pc = d.p ? ((d.c - d.p) / d.p) * 100 : d.c ? 100 : 0;
+        const cls = pc > 0.5 ? 'up' : pc < -0.5 ? 'dn' : 'fl';
+        const txt = Math.abs(pc) < 0.5 ? '0%' : (pc > 0 ? '+' : '−') + Math.abs(pc).toFixed(0) + '%';
+        return mo + `<text class="dl ${cls}" x="${x(i)}" y="${base + 23}" text-anchor="middle">${txt}</text>`;
+      }).join('');
+
+      return (
+        `<svg class="trend" viewBox="0 0 ${TL.w} ${TL.h}" width="100%" role="img" aria-label="Monthly trend, this year against last year">` +
+        `${band}${grid.join('')}` +
+        `<polyline class="pv" points="${pts('p', cells)}"/>` +
+        `<polyline class="cu" points="${pts('c', cells.slice(0, cut))}"/>` +
+        `${dots}${foot}</svg>`
+      );
+    }
+
     // months[i] = [claimCount, credit]. vi picks which one is plotted, so the
-    // credit chart plots credit rather than counts wearing a dollar sign.
-    // No y-axis and no gridlines: every bar carries its own value, so a scale
-    // down the side would only repeat what is already printed on the chart.
-    function monthCompare(n, f, compact, vi) {
-      const a = upTo(PREV, n), b = upTo(S, n);
+    // credit chart plots credit rather than counts wearing a dollar sign. tick
+    // formats the axis, tip formats the hover value.
+    //
+    // The axis is always twelve months but this year only has `had` of them, so
+    // the rest are null rather than zero - a zero would say the month was
+    // measured and came out empty, which is a different and wrong claim.
+    function monthCompare(had, f, tick, vi) {
+      const a = upTo(PREV, had), b = upTo(S, had);
       const k = vi || 0;
-      const cells = MONTHS.slice(0, n).map((m, i) => ({
+      const cells = MONTHS.map((m, i) => ({
         m,
         p: PREV.months[i] ? PREV.months[i][k] : 0,
-        c: S.months[i] ? S.months[i][k] : 0
+        c: i < had && S.months[i] ? S.months[i][k] : null
       }));
-      const tallest = Math.max(...cells.map((d) => Math.max(d.p, d.c)));
-      const { top } = niceScale(tallest);
-      const show = compact;
+      const seen = cells.flatMap((d) => [d.p, d.c].filter((v) => v !== null));
+      const { step, top } = niceScale(seen.length ? Math.max(...seen) : 1);
+      const tail = MONTHS.length > had;
       return (
-        `<div class="mchart noaxis">
-          <div class="mcs">
-            ${cells.map(({ m, p, c }) => {
-              const d = p ? ((c - p) / p) * 100 : c ? 100 : 0;
-              return `<div class="mg">
-                <div class="mgs">
-                  <b class="mgv" style="bottom:${Math.min(97, pnum(c, top)).toFixed(1)}%">${show(c)}</b>
-                  <div class="mbars">
-                    <div class="mbar a" style="height:${Math.max(1.2, pnum(p, top)).toFixed(1)}%" title="${m} ${year - 1}: ${f(p)}"></div>
-                    <div class="mbar b" style="height:${Math.max(1.2, pnum(c, top)).toFixed(1)}%" title="${m} ${year}: ${f(c)}"></div>
-                  </div>
-                </div>
-                <label>${m}</label>
-                <em class="mgd ${d > 0.5 ? 'up' : d < -0.5 ? 'dn' : 'fl'}">${Math.abs(d) < 0.5 ? '0%' : (d > 0 ? '+' : '−') + Math.abs(d).toFixed(0) + '%'}</em>
-              </div>`;
-            }).join('')}
-          </div>
-          <div class="mctot">
-            <span>${n} months</span>
+        `<div class="mchart">` +
+        trendline(cells, top, step, tick, f) +
+        `<div class="mctot">
+            <span>${tail ? `${MONTHS[0]}–${MONTHS[had - 1]} vs full year` : `${had} months`}</span>
             <span><i style="background:#b3a49b"></i>${year - 1} <b>${f(k ? a.v : a.c)}</b></span>
             <span><i style="background:#6366f1"></i>${year} <b>${f(k ? b.v : b.c)}</b></span>
             <span class="mgd ${(k ? b.v : b.c) > (k ? a.v : a.c) ? 'up' : 'dn'}">${(k ? b.v : b.c) > (k ? a.v : a.c) ? '+' : '−'}${Math.abs((((k ? b.v : b.c) - (k ? a.v : a.c)) / ((k ? a.v : a.c) || 1)) * 100).toFixed(1)}%</span>
@@ -1079,7 +1142,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
 
         <div class="split"></div>
 
-        ${sect('This Year vs Last Year', `${MONTHS[0]}–${MONTHS[n - 1]} of both years`)}
+        ${sect('This Year vs Last Year', n < MONTHS.length
+          ? `${MONTHS[0]}–${MONTHS[n - 1]} of ${year} against the full year ${year - 1}`
+          : `${MONTHS[0]}–${MONTHS[n - 1]} of both years`)}
         <div class="grid g2">
           <div class="card">
             ${cardTitle('Claims per month', '', `<span class="mgd ${cur.c > prev.c ? 'up' : 'dn'}" style="margin-top:0">${cur.c > prev.c ? '+' : '−'}${Math.abs(((cur.c - prev.c) / (prev.c || 1)) * 100).toFixed(1)}%</span>`)}
