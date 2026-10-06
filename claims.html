@@ -11,6 +11,33 @@
   <script>
     let filter = { q: '', st: '', pr: '', own: '', de: '', ty: '' };
 
+    // Set when the page was opened with a scenario on it, which is what a card's
+    // "View in table" link does: it arrives here with the population it was about
+    // already applied, instead of the reader landing on the whole list and having
+    // to rebuild the filter from a sentence on the card.
+    let carried = false;
+
+    // Only this page's own filter keys are honoured. A dashboard link that grows
+    // a key this page does not filter on would be silently ignored, which reads
+    // as "this scenario has no claims" rather than as a broken link.
+    const PARAM_KEYS = ['st', 'ty', 'de', 'pr', 'own', 'q'];
+
+    function readParams() {
+      const p = new URLSearchParams(location.search);
+      PARAM_KEYS.forEach((k) => {
+        const v = (p.get(k) || '').trim();
+        if (v) { filter[k] = v; carried = true; }
+      });
+    }
+
+    // Puts the page back to its unfiltered state, and forgets where it came from
+    // so the banner does not survive the clear.
+    function clearFilters() {
+      filter = { q: '', st: '', pr: '', own: '', de: '', ty: '' };
+      carried = false;
+      render();
+    }
+
     // Every list is built from the signed-in user's scope, so a manager can
     // never see another manager's rows no matter what the filters say.
     function inScope() {
@@ -63,10 +90,22 @@
     }
 
     function renderResults() {
-      const rows =
-        inScope()
-          .filter(matches)
-          .map((c) => `
+      const rows = inScope().filter(matches);
+      const chips = activeChips();
+      const empty = rows.length
+        ? ''
+        : carried
+          // A scenario that reached here matched none of the worked examples. The
+          // card it came from counted the whole export, so the honest thing is to
+          // name both populations rather than print a bare "no claims match",
+          // which reads as "this kind of claim does not exist".
+          ? `<tr><td colspan="11" class="mu">No worked example matches ${esc(chips.join(', ') || 'this scenario')}. ` +
+            `The dashboard counts this across all ${num(DATA_QUALITY.total)} claims in the export; ` +
+            `this table holds the ${num(CLAIMS.length)} with real narrative content. ` +
+            `<button class="btn s" onclick="clearFilters()">Clear the filters</button></td></tr>`
+          : '<tr><td colspan="11" class="mu">No claims in your scope match.</td></tr>';
+      document.getElementById('results').innerHTML =
+        rows.map((c) => `
             <tr>
               <td><b>${c.id}</b></td>
               <td>${esc(c.own_by || '—')}</td>
@@ -79,22 +118,65 @@
               <td>${aiSuggestion(c)}</td>
               <td>${badge(c.pr)}</td>
               <td><a class="btn s" href="claim-detail.html?id=${c.id}">Open</a></td>
-            </tr>`)
-          .join('') || `<tr><td colspan="11" class="mu">No claims in your scope match.</td></tr>`;
-      document.getElementById('results').innerHTML = rows;
+            </tr>`).join('') || empty;
+      // The banner's match count is a live figure, not a caption: the selects and
+      // the search box both re-run this function, and a banner that kept the count
+      // it was built with would go stale the moment the reader touched anything.
+      const cc = document.getElementById('carriedCount');
+      if (cc) cc.textContent = `· ${rows.length} of ${num(inScope().length)} worked examples match`;
+      return rows;
+    }
+
+    // The filters currently narrowing the list, in the toolbar's own reading order.
+    function activeChips() {
+      const out = [];
+      if (filter.st) out.push(`status ${filter.st}`);
+      if (filter.ty) out.push(`type ${filter.ty}`);
+      if (filter.de) out.push(`department ${filter.de}`);
+      if (filter.pr) out.push(`priority ${filter.pr}`);
+      if (filter.own) out.push(`owner ${ownerName(filter.own)}`);
+      if (filter.q) out.push(`"${filter.q}"`);
+      return out;
     }
 
     function filterSelect(key, options, label) {
+      // An arriving scenario can name a value none of the rows in scope carry - the
+      // dashboard counts the whole export, this table lists twelve worked examples.
+      // Dropping the value from the list would print the placeholder as if it were
+      // the selection, so the reader would see no filter set while one plainly was.
+      // Keep it in the list and let the empty state explain why.
+      const opts = filter[key] && !options.includes(filter[key])
+        ? [...options, filter[key]].sort()
+        : options;
       return `
         <select onchange="filter.${key}=this.value;renderResults()">
           <option value="">${label}</option>
-          ${options.map((x) => `<option ${filter[key] === x ? 'selected' : ''}>${x}</option>`).join('')}
+          ${opts.map((x) => `<option ${filter[key] === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}
         </select>`;
     }
 
     function render() {
       const admin = isAdmin();
       const total = inScope().length;
+      const shown = inScope().filter(matches).length;
+      // Only shown when the page was opened with a scenario on it. The reader
+      // arrived here from a card, and a filter they did not set is a filter they
+      // need to be told about - with the way out of it in the same row.
+      //
+      // It also carries the matching count, because the card that sent the reader
+      // here counts the whole export while this table holds a dozen worked
+      // examples. Without the count, "845 claims" on the card and "2 rows" on this
+      // page read as two pages disagreeing about the same number. They are not:
+      // one is the population, this is the sample drawn from it.
+      const banner = carried
+        ? `<div class="row" style="margin:2px 0 14px">
+             <span class="b High">Scenario from the dashboard</span>
+             <span class="mu" style="font-size:12px">${esc(activeChips().join(' · '))}</span>
+             <span class="mu" style="font-size:12px" id="carriedCount">· ${shown} of ${num(total)} worked examples match</span>
+             <div class="sp"></div>
+             <button class="btn s" onclick="clearFilters()">Clear filters</button>
+           </div>`
+        : '';
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:4px">
           <div><h1>${admin ? 'Claims' : 'My Claims'}</h1><span class="mu">${num(total)} worked example${total === 1 ? '' : 's'} in your scope · ${num(OWNER_QUEUE.length)} claims still need work across the whole export</span></div>
@@ -108,8 +190,9 @@
             : `Only claims owned by ${esc(getSession().name)} are listed.`}</span>
         </div>
         <div class="card">
+          ${banner}
           <div class="row" style="margin-bottom:14px">
-            <input id="q" placeholder="Search claim, order, type…" value="${filter.q}"
+            <input id="q" placeholder="Search claim, order, type…" value="${esc(filter.q)}"
                    oninput="filter.q=this.value;renderResults()" style="min-width:240px">
             ${filterSelect('st', ['Open', 'Resolved', 'Cancelled', 'Denied'], 'Status')}
             ${filterSelect('de', [...new Set(inScope().map((c) => c.de))].sort(), 'Department')}
@@ -132,8 +215,7 @@
     function main() {
       if (!requireAuth()) return;
       document.body.innerHTML = layout('claims');
-      const st = new URLSearchParams(location.search).get('st');
-      if (st) filter.st = st;
+      readParams();
       render();
     }
   </script>

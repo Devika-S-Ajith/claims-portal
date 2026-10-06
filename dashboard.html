@@ -43,12 +43,6 @@
 
     let year = LATEST_YEAR;
     let typesExpanded = false;
-let focus = null;
-    let queueGroup = 'reason';
-    // The reader's own Group by choice, parked while a card filter is driving the
-    // grouping so Clear can hand it straight back.
-    let groupBeforeFocus = null;
-    let queueSearch = '';
     let rateMetric = 'open';
     // Department comparison used to be three charts; it is one sortable table now.
     // deptSort is the active column, deptDir the direction within it.
@@ -102,7 +96,7 @@ let focus = null;
 
     // The queue covers every open claim ever raised. The dashboard is year
     // scoped, so it is cut to the selected year - which also means every count
-    // on this page is the same population the table below shows.
+    // on this page is the same population the card pop-ups describe.
     function queue() {
       return scopedQueue().filter((r) => String(r.date || '').slice(0, 4) === String(year));
     }
@@ -312,16 +306,14 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         counts &mdash; these are shares of all claims, not defect rates against goods handled.</p>`;
     }
 
-    // rowsFor the types list carry a stable id and their own type name, because
-    // the AI insight cards link straight to a specific row of this list.
+    // [name, claims, credit]
     function hbar(key, data, max) {
       const i = metric[key] === 'value' ? 2 : 1;
       const top = max || Math.max(...data.map((d) => d[i]), 1);
-      return data.map((d, n) => {
+      return data.map((d) => {
         const v = d[i];
-        const attrs = key === 'types' ? ` id="ty-${n}" data-ty="${esc(d[0])}"` : '';
         return (
-          `<div class="hb${metric[key] === 'value' ? ' wide' : ''}"${attrs}>` +
+          `<div class="hb${metric[key] === 'value' ? ' wide' : ''}">` +
           `<div title="${esc(d[0])}">${esc(d[0])}</div>` +
           `<div class="trk"><span style="width:${pnum(v, top).toFixed(1)}%"></span></div>` +
           `<b>${fmt(key, v)}</b></div>`
@@ -398,8 +390,8 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         const tip = `${rk.label} in ${r.dept}: ${rk.fmt(r.rate)}` +
           ` · ${rk.raw(r.of)} of ${num(r.den)}` +
           (thin ? ` — a base of only ${num(r.den)} is too small to read` : '');
-        return `<tr onclick="jump('de','${esc(r.dept)}')" tabindex="0"
-            onkeydown="if(event.key==='Enter'||event.key===' '){jump('de','${esc(r.dept)}');return false}"
+        return `<tr onclick="openSlice('de','${esc(r.dept)}')" tabindex="0"
+            onkeydown="if(event.key==='Enter'||event.key===' '){openSlice('de','${esc(r.dept)}');return false}"
             title="${esc(tip)}">
           <td class="name">${esc(r.dept)}</td>
           <td class="n"><b>${num(r.count)}</b><span class="mb"><i style="width:${pnum(r.count, maxC).toFixed(1)}%"></i></span></td>
@@ -504,8 +496,8 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           .filter(([k]) => CARRIER_WHY[k])
           .map(([k]) => `${CARRIER_COLS.find(([kk]) => kk === k)[1]} ${num(c[CARRIER_KEY[k]])}`)
           .join(' · ');
-        return `<tr onclick="jump('ca','${esc(name)}')" tabindex="0"
-            onkeydown="if(event.key==='Enter'||event.key===' '){jump('ca','${esc(name)}');return false}"
+        return `<tr onclick="openSlice('ca','${esc(name)}')" tabindex="0"
+            onkeydown="if(event.key==='Enter'||event.key===' '){openSlice('ca','${esc(name)}');return false}"
             title="${esc(tip + ' · ' + whyTip)}">
           <td class="name">${esc(name)}${both ? ' <span class="mu" style="font-size:11px">(both named)</span>' : ''}</td>
           <td class="n"><b>${num(claims)}</b><span class="mb"><i style="width:${pnum(claims, maxC).toFixed(1)}%"></i></span></td>
@@ -719,7 +711,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       );
     }
     function setMetric(key) { metric[key] = isMoney(key) ? 'count' : 'value'; render(); }
-    function setYear(y) { year = y; typesExpanded = false; focus = null; groupBeforeFocus = null; queueSearch = ''; render(); }
+    function setYear(y) { year = y; typesExpanded = false; render(); }
     function toggleTypes() { typesExpanded = !typesExpanded; render(); }
     function setRate(k) { rateMetric = k; render(); }
     function setDeptMoney(m) { deptMoney = m; render(); }
@@ -738,23 +730,25 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       render();
     }
 
-    // An AI insight card names a claim type; the Top claim types list below holds
-    // that type as a row. This scrolls to it and flashes it, so the two are one
-    // thought rather than two disconnected places. If the type is outside the
-    // collapsed top ten it expands the list first, otherwise the link would point
-    // at a row that is not rendered.
-    function viewInTable(type) {
-      const i = S.types.findIndex((t) => t[0] === type);
-      if (i < 0) return;
-      if (i >= (typesExpanded ? S.types.length : TYPES_TOP)) typesExpanded = true;
-      render();
-      const el = document.getElementById('ty-' + i);
-      if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.remove('flash');
-      void el.offsetWidth;
-      el.classList.add('flash');
-      setTimeout(() => el.classList.remove('flash'), 1900);
+    // Where "View in table" goes. Claims are listed on claims.html, so a card that
+    // names a population deep-links into that page with the population already
+    // applied, rather than filtering a table that used to live here. The query is
+    // built from claims.html's own filter keys - the same keys its toolbar writes -
+    // so the link and the page cannot disagree about what a scenario is.
+    function claimsHref(q) {
+      const p = new URLSearchParams();
+      Object.keys(q).forEach((k) => { if (q[k]) p.set(k, q[k]); });
+      return 'claims.html?' + p.toString();
+    }
+
+    // The card's table link, or nothing. A card with no scenario the claims table
+    // can express says so and offers no link at all, rather than opening the whole
+    // table behind a label implying the link had narrowed anything.
+    function cardLink(a) {
+      const l = a.link;
+      if (!l) return '';
+      const href = l.page || claimsHref(l.q || {});
+      return `<a class="ac-view" href="${href}">${esc(l.label)} &#8599;</a>`;
     }
 
     // Reporting-year dropdown, same open/close behaviour as the nav menu.
@@ -780,8 +774,20 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     //   prio - 1 Do First, 2 Do Next, 3 Review. The only sort key that matters.
     //   w    - weight, breaks ties inside a priority tier.
     //   src  - 'ai' or 'metric'; drives the source tag and nothing else.
-    //   go   - the verb on the button. Every card opens the same table, so the
-    //          verb has to say what the reader will find there.
+    //   kind/value - the population the card is about, matched against the open
+    //          queue so the pop-up can say who is in it.
+    //   go   - the verb on the card. It opens the card's pop-up, so the verb
+    //          names what the reader is about to be shown.
+    //   why  - one sentence on how the headline number was measured. The card has
+    //          room for a count and a context line only; this is what turns the
+    //          count into something the reader can check, and it lives in the
+    //          pop-up rather than on the card so the grid stays one line per card.
+    //   link - optional { label, q } for the claims table, or { label, page } to
+    //          point somewhere else. Absent where the claims table cannot express
+    //          the scenario, because a link that opens everything is a lie.
+    //   noTable - why there is no link, for the pop-up's footer to state. Better a
+    //          sentence the reader can check than a control that leads somewhere
+    //          the label does not describe.
     // Whole-year totals (total raised, resolved) are deliberately absent: they
     // have no filter to open and nothing to pick up, so they live in the KPI
     // tiles once rather than sitting in a priority queue.
@@ -828,7 +834,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           src: 'ai', prio: 1, w: 1, n: c.total, kind: 'ty', value: c.t,
           label: 'Recurring issue',
           v: `${c.t} in ${c.inMonths} of ${n} months · ${usd(creditOf(c.t))} credit`,
-          go: 'Investigate pattern'
+          go: 'Investigate pattern',
+          why: `Every claim of this type raised in ${year}, counted off the monthly series. It appears in all ${c.inMonths} months the year has run to, which is what separates a standing fault from a one-off incident - a type that turned up in three months and then stopped would not qualify.`,
+          link: { label: 'View in table', q: { ty: c.t } }
         });
       }
 
@@ -841,7 +849,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           src: 'ai', prio: 2, w: 4, n: t[1], kind: 'ty', value: t[0],
           label: 'High-value impact',
           v: `${t[0]} · ${usd(t[2])} · ${pct(t[2], S.credit)} of credit`,
-          go: 'Investigate pattern'
+          go: 'Investigate pattern',
+          why: `The claim type carrying the most credit in ${year}, after ranking the whole year by money rather than by count - the type list is sorted by volume, so re-ranking it is what makes "high value" mean valuable instead of merely frequent. The number on the card is its claim count; the money is why it is here.`,
+          link: { label: 'View in table', q: { ty: t[0] } }
         });
       }
 
@@ -865,7 +875,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           src: 'ai', prio: 3, w: 7, n: g.total, kind: 'ty', value: g.t,
           label: 'Emerging trend',
           v: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month · ${usd(creditOf(g.t))} credit`,
-          go: 'Investigate pattern'
+          go: 'Investigate pattern',
+          why: `The type whose last three months average at least 1.5x its first three, on at least ${num(g.total)} claims for the year and at least ${g.tail.toFixed(0)} a month at the tail. Both floors are load-bearing: without them a 3 → 9 a month wobble across twenty claims gets dressed up as a trend.`,
+          link: { label: 'View in table', q: { ty: g.t } }
         });
       }
 
@@ -885,59 +897,70 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           src: 'ai', prio: 2, w: 5, n: byOpen[topOpen], kind: 'ty', value: topOpen,
           label: 'Potential CAPA',
           v: `${topOpen} is the biggest open pile · ${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
-          go: 'Start CAPA review'
+          go: 'Start CAPA review',
+          why: `The claim type holding the largest pile of claims that still need work in ${year}. It is a prompt to start a corrective action, not a finding that a cause is already known: nothing in this export records one, and the pop-up says how few claims carry any at all.`,
+          link: { label: 'View in table', q: { ty: topOpen } }
         });
       }
 
       return out;
     }
-
-    // The metric half of the feed. Each count is the exact number of rows the
-    // card's filter opens, so the feed and the table below cannot disagree.
-    // Weight only matters inside a priority tier, and matches where the same
-    // item used to sit in reading order.
+// The metric half of the feed. Each count is read off the same stats block every
+    // other figure on the page uses, so the feed and the figures in the stat line
+    // cannot disagree. Weight only matters inside a priority tier, and matches
+    // where the same item used to sit in reading order.
     function buildActions() {
       const out = [];
+
       const add = (o) => { if (o.n > 0) out.push(o); };
 
       add({
         src: 'metric', prio: 1, w: 3, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
         label: 'Awaiting action',
         v: `${pct(S.unfinished, S.total)} of intake · entry not marked finished`,
-        go: 'Review entries'
+        go: 'Review entries',
+        why: `Claims raised in ${year} whose ClaimEntryFinished field is not 1 - somebody opened the entry and did not close it out. It counts the whole year rather than only what is still open, so a claim closed since still shows up here.`,
+        // Deliberately no table link. The flag this card counts has no column on
+        // claims.html, and the nearest thing there - status Open - is a different
+        // population, because a resolved claim can still carry an unfinished entry.
+        // A link to the wrong population is worse than no link.
+        noTable: 'The claims table has no column for entry-not-finished, and status Open is a different set, so there is nothing there to link to.'
       });
 
       add({
         src: 'metric', prio: 2, w: 6, n: S.repeatClaims, kind: 'reason', value: 'Repeat-claim order',
         label: 'Repeat-claim orders',
         v: `${num(S.repeatOrders)} orders hit twice · ${usd(S.repeatCredit)} credit`,
-        go: 'Review orders'
+        go: 'Review orders',
+        why: `Claims raised in ${year} against an OrderID that raised more than one claim anywhere in the whole 2010-2026 file, not just this year - so an order claimed against in two different years still counts. A repeat claim is usually one problem entered twice.`,
+        link: { label: 'View orders', page: 'orders.html' }
       });
 
       return aiFindings().concat(out).sort((a, b) => a.prio - b.prio || a.w - b.w);
     }
 
-    // Every card is the same six-part shape regardless of origin: priority tag,
-    // source tag, headline number, label, one line of context, one verb. The
-    // flex column plus margin-top:auto on the action row keeps every row of
-    // actions on the same baseline, which a fixed structure is what buys you.
+    // Every card is the same seven-part shape regardless of origin: priority tag,
+    // source tag, headline number, label, one line of context, one verb and one
+    // table link. The flex column plus margin-top:auto on the action row keeps
+    // every row of actions on the same baseline, which a fixed structure is what
+    // buys you.
     //
-    // The card is a div, not an anchor, because an AI card now carries a second
-    // control - the link into Top claim types - and a button inside an anchor is
-    // not valid HTML and is not reliably clickable. The stretched ::after on
-    // .ac-jump keeps the whole card clickable for the primary jump; the action
-    // row sits above it on its own z-index.
-    const actCard = (a) => {
-      const sel = focus && a.kind && focus.kind === a.kind && focus.value === a.value ? ' sel' : '';
+    // The card is a div, not an anchor, because a card carries a second control -
+    // the link out to the claims table - and a link inside an anchor is not valid
+    // HTML and is not reliably clickable. The stretched ::after on .ac-jump keeps
+    // the whole card clickable for the pop-up; the action row sits above it on its
+    // own z-index.
+    //
+    // The verb is the pop-up and the table link is the way out of it: a reader who
+    // wants the rows gets the rows, and a reader who wants to understand the number
+    // gets it without losing their place on the page. n is the card's position in
+    // the feed, which is the same array buildActions() returns here, so the pop-up
+    // and the card cannot end up describing different things.
+    const actCard = (a, n) => {
       const [pLabel, pCls] = PRIO[a.prio];
       const [sLabel, sCls] = SRC[a.src];
-      // Only a card that names a claim type can offer the link; the metric cards
-      // count a population rather than point at a row, so a link would be a lie.
-      const view = a.kind === 'ty' && S.types.some((t) => t[0] === a.value)
-        ? `<button class="ac-view" type="button" onclick="viewInTable('${esc(a.value)}');return false">View in table &#8595;</button>`
-        : '';
-      return `<div class="card ncard ${pCls}${sel}">
-          <a class="ac-jump" href="#attention" onclick="jump('${esc(a.kind)}','${esc(a.value)}');return false">
+      return `<div class="card ncard ${pCls}">
+          <a class="ac-jump" href="#" onclick="openCard(${n});return false">
             <span class="tags"><span class="tag ${pCls}">${pLabel}</span><span class="tag ${sCls}">${sLabel}</span></span>
             <b class="ac-n">${num(a.n)}</b>
             <span class="ac-label">${esc(a.label)}</span>
@@ -945,7 +968,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           </a>
           <div class="ac-act">
             <span class="go">${esc(a.go)} &#8594;</span>
-            ${view}
+            ${cardLink(a)}
           </div>
         </div>`;
     };
@@ -965,170 +988,202 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       return `<div class="grid g3">${all.map(actCard).join('')}</div>`;
     }
 
-    // ---------- open claims table ----------
-    const QUEUE_GROUPS = {
-      reason: { label: 'Flag', key: (r) => r.reasons, max: 12 },
-      de: { label: 'Department', key: (r) => [r.de], max: 12 },
-      ar: { label: 'Team area', key: (r) => [r.ar], max: 8 },
-      ty: { label: 'Claim type', key: (r) => [r.ty], max: 12 },
-      st: { label: 'Status', key: (r) => [r.st], max: 10 }
-    };
-    const queueGrouping = () => QUEUE_GROUPS[queueGroup] || QUEUE_GROUPS.reason;
+// ---------- the detail pop-up ----------
+    // A card prints one number and one line of context. This is where the rest
+    // lives: how the number was measured, how it sits against the rest of the
+    // year, and which slices make it up. Every figure is read off the same stats
+    // block and the same scoped queue the card itself was built from, so the
+    // pop-up cannot drift away from the card that opened it.
+    //
+    // The frame - scrim, scroll lock, Escape - lives in app.js, as one shell for
+    // the whole app. What goes inside it is this page's.
 
-    // Search matches the claim id and the order number, which are the two things
-    // a person actually holds in their hand when they look for a claim. Leading
-    // and trailing spaces are ignored so a pasted value still matches.
-    function searchHit(r) {
-      const q = searchTerm();
-      if (!q) return true;
-      return String(r.id).toLowerCase().includes(q) || String(r.o || '').toLowerCase().includes(q);
+    // The open claims behind one card. The queue is the set of claims that still
+    // needs work, already cut to the year and to the reader, so it is the honest
+    // answer to "who is in this" - and it is a subset of the card's own number,
+    // not the same thing: the card counts the whole year, the queue only what is
+    // still open. The pop-up states both, so the two cannot read as one figure.
+    function sliceRows(a) {
+      const q = queue();
+      if (a.kind === 'reason') return q.filter((r) => r.reasons.includes(a.value));
+      return q.filter((r) => r[a.kind] === a.value);
     }
 
-    // queueSearch is a plain string in normal use, but coercing here keeps a
-    // stray non-string from taking the whole section down.
-    const searchTerm = () => String(queueSearch == null ? '' : queueSearch).trim().toLowerCase();
-    const searching = () => searchTerm() !== '';
-
-    function setQueueSearch(v) {
-      queueSearch = v == null ? '' : String(v);
-      render();
-      // Re-render blows away the input, so put the caret back where it was.
-      const el = document.getElementById('qsearch');
-      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    // [label, count] pairs, biggest first. Ties break on the name so two opens of
+    // the same card come back in the same order.
+    function tally(rows, f) {
+      const m = new Map();
+      rows.forEach((r) => { const k = f(r); m.set(k, (m.get(k) || 0) + 1); });
+      return [...m.entries()].sort((x, y) => y[1] - x[1] || String(x[0]).localeCompare(String(y[0])));
     }
 
-    function matches(r) {
-      if (!searchHit(r)) return false;
-      if (!focus) return true;
-      if (focus.kind === 'reason') return r.reasons.includes(focus.value);
-      return r[focus.kind] === focus.value;
+    // A titled block of top-N composition bars. The bar is scaled to the largest
+    // row rather than to the total: the question a top-five list answers is "which
+    // one is the biggest", and a bar measured against the total renders every row
+    // of a long-tailed list as the same sliver.
+    function popGroup(title, rows, limit) {
+      const list = rows.slice(0, limit || 5);
+      if (!list.length) return '';
+      const top = list[0][1];
+      return `<div class="mdl-grp"><h4>${esc(title)}</h4>` +
+        list.map(([k, n]) => `
+          <div class="mdl-row">
+            <div class="lbl" title="${esc(k)}">${esc(k)}</div>
+            <div class="bar"><i style="width:${pnum(n, top).toFixed(1)}%"></i></div>
+            <b>${num(n)}</b>
+          </div>`).join('') +
+        (rows.length > list.length
+          ? `<div class="mu" style="font-size:11.5px;margin-top:6px">and ${num(rows.length - list.length)} more</div>`
+          : '') +
+        '</div>';
     }
 
-    function jump(kind, value) {
-      focus = { kind, value, label: value };
-      // The grouping has to follow the filter, or the jump lands on nothing.
-      // groupedTable opens the one group whose key equals the active filter, and
-      // an AI card filters by claim type while a metric card filters by flag - so
-      // if the reader's grouping is neither, that key is in no bucket, every
-      // group stays closed, and scrolling down shows a table of headers with no
-      // rows under them.
-      if (kind in QUEUE_GROUPS && kind !== queueGroup) {
-        groupBeforeFocus = queueGroup;
-        queueGroup = kind;
-      }
-      render();
-      document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    function popFacts(rows) {
+      return `<dl class="mdl-facts">` + rows
+        .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`)
+        .join('') + '</dl>';
     }
 
-    function clearFocus() {
-      focus = null;
-      if (groupBeforeFocus) { queueGroup = groupBeforeFocus; groupBeforeFocus = null; }
-      render();
-      document.getElementById('attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    function statusBadge(s) {
-      const cls = { Resolved: 'Low', Open: 'Open', Cancelled: 'Rejected', Denied: 'Rejected' }[s] || 'Open';
-      return `<span class="b ${cls}">${s}</span>`;
-    }
-
-    function renderAttention() {
-      const all = queue();
-      const isSearching = searching();
-      const filtering = Boolean(focus) || isSearching;
-      // No fallback to `all` while filtering: a search that matches nothing has
-      // to say so, not quietly display the whole queue again.
-      const shown = filtering ? all.filter(matches) : all;
-      const admin = isAdmin();
-      const g = queueGrouping();
-
-      // The card title above already states the year's open-claim count, so the
-      // resting state says nothing here. The banner only appears when a search
-      // or a card filter is active, and it carries just the active filter plus
-      // the way out - the "n of m" readout lives once, in the toolbar below.
-      const banner = isSearching
-        ? `<div class="row" style="margin-bottom:10px">
-             <span class="b High">${esc(queueSearch.trim())}</span>
-             <div class="sp"></div>
-             <button class="btn s" onclick="setQueueSearch('')">Clear search</button>
-           </div>`
-        : focus
-        ? `<div class="row" style="margin-bottom:10px">
-             <span class="b High">${esc(focus.value)}</span>
-             <div class="sp"></div>
-             <button class="btn s" onclick="clearFocus()">Clear</button>
-           </div>`
-        : '';
-
-      const colCount = admin ? 9 : 8;
-      // One table, one thead, one tbody per group. Separate tables per group
-      // let each size its own columns, which is what made the header stop
-      // lining up with the rows underneath it.
-      // No wrapper <tbody> here: groupedTable returns one <tbody> per group, and
-      // a <tbody> inside a <tbody> is invalid - browsers hoist the inner ones
-      // out and the grouping stops being scoped to this table.
-      const head = `<div class="tw" style="border:0;margin-top:10px;border-radius:0">
-          <table class="qtable">
-            <thead><tr><th>Claim</th><th>Order</th><th>Claim Type</th><th>Dept</th>${admin ? '<th>Owner</th>' : ''}<th>Status</th><th>Credit</th><th>Root cause</th><th>Raised</th></tr></thead>
-          </table>
-        </div>`;
-
-      const rowHtml = (r) => `
-        <tr class="${focus && matches(r) ? 'hit' : ''}">
-          <td><b>#${esc(r.id)}</b></td>
-          <td>${esc(r.o)}</td>
-          <td>${esc(r.ty)}</td>
-          <td>${esc(r.de)}</td>
-          ${admin ? `<td>${esc(ownerName(r.own))}</td>` : ''}
-          <td>${statusBadge(r.st)}</td>
-          <td>${r.am ? money(r.am) : '<span class="mu">—</span>'}</td>
-          <td>${r.reasons.map((x) => `<span class="b Awaiting">${esc(x)}</span>`).join(' ')}</td>
-          <td>${fmtDate(r.date)}</td>
-        </tr>`;
-
-      const controls = `<div class="qbar">
-          <div class="qsearch">
-            <input id="qsearch" type="search" placeholder="Search claim no. or order no." value="${esc(queueSearch)}"
-              autocomplete="off" spellcheck="false" aria-label="Search by claim number or order number"
-              oninput="setQueueSearch(this.value)">
-            ${isSearching ? `<button class="qclear" type="button" onclick="setQueueSearch('')" aria-label="Clear search">×</button>` : ''}
-          </div>
-          <span class="mu">Group by</span>
-          <select onchange="queueGroup=this.value;openGroups.clear();render()"${focus ? ' disabled title="Grouping is following the card filter above — clear it to choose your own"' : ''}>
-            ${Object.entries(QUEUE_GROUPS).map(([k, v]) => `<option value="${k}"${queueGroup === k ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
-          </select>
-          ${focus ? '<span class="mu" style="font-size:12px">following the filter above</span>' : ''}
+    // One footer for every pop-up on this page: the way out to the rows, if the
+    // claims table can express this scenario, and a plain Close. A card with no
+    // honest scenario says so in words instead of shipping a link that would open
+    // the whole table behind a label implying it had narrowed anything.
+    function popFoot(link, why) {
+      return `<div class="mdl-ft">
+          ${link ? `<a class="btn s p" href="${link.href}">${esc(link.label)} &#8599;</a>` : ''}
+          <button class="btn s" type="button" onclick="closeModal()">Close</button>
           <div class="sp"></div>
-          ${filtering ? `<span class="mu">${num(shown.length)} of ${num(all.length)} shown</span>` : ''}
-          <button class="btn s" onclick="expandAllGroups()">Expand all</button>
-          <button class="btn s" onclick="collapseAllGroups()">Collapse all</button>
+          ${link ? '' : `<span class="mu">${esc(why || 'Nothing on the claims table filters to this one.')}</span>`}
         </div>`;
+    }
 
-      const body = groupedTable(shown, {
-        cols: colCount,
-        key: g.key,
-        max: g.max,
-        onlyKey: focus ? focus.value : null,
-        rowSort: (a, b) => String(b.date).localeCompare(String(a.date)),
-          rowHtml,
-          empty: isSearching
-            ? `No open claim matches "${queueSearch.trim()}".`
-            : focus
-              ? 'No open claims in your scope match this filter.'
-              : 'No open claims in your scope for this year.'
-        });
+    // Everything a card has no room for. Assembled per card rather than laid out
+    // generically, because a claim-type card is about money and months while an
+    // unfinished-entry card is about departments and which claim types are piling
+    // up - one fixed figure set for both would have to drop whichever set the card
+    // happened not to need.
+    function cardDetail(a) {
+      const rows = sliceRows(a);
+      const facts = [];
+      let groups = '';
 
-      // Close the shared table, then splice the per-group <tbody>s in before
-      // that tag so the header and the data stay in one table.
-      return banner + controls + head.replace('</table>', body + '</table>');
+      if (a.kind === 'ty') {
+        const t = S.types.find((x) => x[0] === a.value) || [a.value, 0, 0];
+        const ms = (S.typeMonths || []).find((x) => x[0] === a.value);
+        const n = monthsSoFar();
+        const inMonths = ms ? ms[1].slice(0, n).filter((v) => v > 0).length : 0;
+        facts.push(['Claims', num(t[1])]);
+        facts.push(['Credit', usd(t[2])]);
+        facts.push(["Of the year's claims", pct(t[1], S.total)]);
+        facts.push(["Of the year's credit", pct(t[2], S.credit)]);
+        facts.push(['Months it appears', `${inMonths} of ${n}`]);
+        facts.push(['Still open', `${num(rows.length)} · ${pct(rows.length, t[1])}`]);
+        if (ms) groups += popGroup('Claims per month', ms[1].slice(0, n).map((v, i) => [MONTHS[i], v]).filter((e) => e[1] > 0), 12);
+        groups += popGroup('Departments with it open', tally(rows, (r) => r.de));
+        groups += popGroup('Owners holding it', tally(rows, (r) => r.own).map(([id, c]) => [ownerName(id), c]));
+      } else {
+        facts.push(['Claims', num(a.n)]);
+        facts.push(["Of the year's intake", pct(a.n, S.total)]);
+        facts.push(['Still open', num(rows.length)]);
+        facts.push(['Departments involved', num(new Set(rows.map((r) => r.de)).size)]);
+        facts.push(['Claim types involved', num(new Set(rows.map((r) => r.ty)).size)]);
+        facts.push(['Credit on the open ones', usd(rows.reduce((s, r) => s + (r.am || 0), 0))]);
+        if (a.value === 'Repeat-claim order') {
+          facts.push(['Orders hit more than once', num(S.repeatOrders)]);
+          groups += popGroup('Worst-hit orders', tally(rows.filter((r) => r.o), (r) => r.o));
+        }
+        groups += popGroup('Departments', tally(rows, (r) => r.de));
+        groups += popGroup('Claim types', tally(rows, (r) => r.ty));
+      }
+
+      const [pLabel, pCls] = PRIO[a.prio];
+      const [sLabel, sCls] = SRC[a.src];
+      const link = a.link ? { label: a.link.label, href: a.link.page || claimsHref(a.link.q || {}) } : null;
+
+      return `
+        <div class="mdl-hd">
+          <div class="mdl-n">
+            <span class="tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px"><span class="tag ${pCls}">${pLabel}</span><span class="tag ${sCls}">${sLabel}</span></span>
+            <h3 id="mdl-t">${esc(a.label)}</h3>
+            <span class="mdl-sub">${esc(a.v)}</span>
+          </div>
+          <button class="mdl-x" type="button" onclick="closeModal()" aria-label="Close">&#215;</button>
+        </div>
+        <div class="mdl-bd">
+          <p class="mdl-why">${esc(a.why)}</p>
+          ${popFacts(facts)}
+          ${groups || '<p class="mu" style="font-size:12px">Nothing on this is open any more, so there is nothing to break down.</p>'}
+        </div>
+        ${popFoot(link, a.noTable)}`;
+    }
+
+    function openCard(i) {
+      const a = buildActions()[i];
+      if (a) openModal(cardDetail(a));
+    }
+
+    // A department or a carrier row, in the same pop-up. Both tables used to hand
+    // off to the open-claims table, which no longer lives on this page, so a row
+    // that silently did nothing would be worse than not offering the interaction at
+    // all. The figures come from the same rows the two tables above are built from,
+    // so the pop-up is a re-reading of the row and not a second source.
+    //
+    // A department has a scenario the claims table can express and a carrier has
+    // none - the export has no Carrier column, so the courier is read out of the
+    // department, type and description and there is nothing on claims.html to
+    // filter it by. That row says so rather than linking somewhere that shows
+    // something else.
+    function openSlice(kind, value) {
+      const isDept = kind === 'de';
+      const d = (isDept ? deptFacts() : carrierFacts()).find((x) => x[0] === value);
+      const rows = queue().filter((r) => (isDept ? r.de : r.ca) === value);
+      const facts = isDept && d
+        ? [
+            ['Claims raised', num(d[3])],
+            ['Credit', usd(d[6])],
+            ['Orders', num(d[4])],
+            ['Still open', `${num(d[5])} · ${pct(d[5], d[3])}`],
+            ['Repeat orders', num(d[9])],
+            ['Credit per claim', usd(d[3] ? d[6] / d[3] : 0)]
+          ]
+        : d
+        ? [
+            ['Claims', num(d[1])],
+            ['Credit', usd(d[5])],
+            ['Orders', num(d[2])],
+            ['Still open', `${num(d[3])} · ${pct(d[3], d[1])}`],
+            ['Slowest 10% closed in', d[9] ? d[8].toFixed(1) + 'd' : '—'],
+            ['Median close', d[9] ? d[7].toFixed(1) + 'd' : '—']
+          ]
+        : [];
+
+      const why = isDept
+        ? `Every claim raised in ${year} from this department, off the same row the comparison table above is built from. Still open is this year's open-claim queue narrowed to it, so it counts denied and cancelled entries as well as unresolved ones.`
+        : `The export has no Carrier column, so this is counted out of the department, claim type and description. The six reason columns in the scorecard partition these claims - each one lands on exactly one reason or on "not a carrier fault" - which is why they add up to the claim count rather than exceeding it.`;
+
+      return openModal(`
+        <div class="mdl-hd">
+          <div class="mdl-n">
+            <span class="tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px"><span class="tag smetric">${isDept ? 'Department' : 'Carrier'}</span></span>
+            <h3 id="mdl-t">${esc(value)}</h3>
+            <span class="mdl-sub">${num(d ? (isDept ? d[3] : d[1]) : rows.length)} claims in ${esc(String(year))} · ${num(rows.length)} still open</span>
+          </div>
+          <button class="mdl-x" type="button" onclick="closeModal()" aria-label="Close">&#215;</button>
+        </div>
+        <div class="mdl-bd">
+          <p class="mdl-why">${esc(why)}</p>
+          ${facts.length ? popFacts(facts) : ''}
+          ${popGroup('Departments', tally(rows, (r) => r.de))}
+          ${popGroup('Claim types', tally(rows, (r) => r.ty))}
+        </div>
+        ${popFoot(isDept ? { label: 'View in table', href: claimsHref({ de: value }) } : null,
+          isDept ? '' : 'A carrier is not a field on the claims table, so there is nothing to filter to.')}`);
     }
 
     // ---------- render ----------
     function render() {
       S = stats(year);
       PREV = stats(year - 1);
-      const me = getSession();
-      const admin = isAdmin();
       const df = deptFacts();
       const cf = carrierFacts();
       const n = monthsSoFar();
@@ -1136,7 +1191,6 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       const dClaims = delta(cur.c, prev.c);
       const dCredit = delta(cur.v, prev.v);
       const typesShown = typesExpanded ? S.types : S.types.slice(0, TYPES_TOP);
-      const openItems = queue().length;
 
       // The stat line under the page title. Plain sentences, not pills: a red or
       // green badge states a verdict, and on these three lines "up" is not one
@@ -1222,7 +1276,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
             </div>`).join('')}
         </div>
 
-        ${sect('Needs Attention', 'Patterns and metrics, most urgent first')}
+        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
         ${renderFindings()}
 
         <div class="split"></div>
@@ -1267,7 +1321,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           ${cardTitle('', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
           ${deptTable(df, rk, rateAvg)}
           <div class="row" style="margin-top:10px">
-            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rk.fmt(rateAvg)} average · click a row to open its cases</span>
+            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rk.fmt(rateAvg)} average · click a row for its detail</span>
           </div>
         </div>
 
@@ -1284,7 +1338,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
               breakdown of Claims, not six extra claims: each claim is counted against one reason or
               against "not a carrier fault", so they add up · no claim rate, because the export
               lists only orders that raised a claim, so the denominator would be the numerator
-              · click a row to open its cases</span>
+              · click a row for its detail</span>
           </div>
         </div>
 
@@ -1309,27 +1363,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
               <span class="mu" style="font-size:12px">${esc(topBand[0])} alone carries <b>${pct(topBand[2], distSum)}</b> of the ${usd(distSum)} credited in ${esc(year)}.</span>
             </div>` : ''}
           </div>
-        </div>
-
-        <div class="card" id="attention" style="margin-top:24px;scroll-margin-top:80px">
-          ${cardTitle('Open Claims', `${num(openItems)} in ${year} · ${admin ? 'all owners' : 'your caseload'}`, `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
-          <p class="mu ocap">${openCaption(openItems, S.unresolved)}</p>
-          ${renderAttention()}
         </div>`;
-    }
-
-    // The stat line says "Still open" and this table is the work queue below it.
-    // Those are two different populations and used to sit on the page with no
-    // stated relationship, which is the kind of thing a reader resolves by
-    // assuming they are the same number. The queue is the wider of the two: it
-    // also holds denied, cancelled and never-finished entries, all of which are
-    // work someone still has to close out.
-    function openCaption(shown, unresolved) {
-      const extra = shown - unresolved;
-      const head = `Showing all ${num(shown)} open case${shown === 1 ? '' : 's'} in ${year}.`;
-      if (!extra) return `${head} This is the same ${num(unresolved)} the "Still open" figure at the top of the page counts.`;
-      return `${head} The "Still open" figure at the top of the page (${num(unresolved)}) counts only claims not marked resolved, ` +
-        `so this table is ${num(extra)} wider &mdash; it also holds denied, cancelled and never-finished entries.`;
     }
 
     function main() {

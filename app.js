@@ -293,6 +293,44 @@ function toast(message) {
   setTimeout(() => (el.className = ''), 2200);
 }
 
+// ---------------------------------------------------------------------------
+// Modal
+// ---------------------------------------------------------------------------
+// One shell for the whole app, mounted by layout() as a sibling of #app rather
+// than rendered inside it. Every page rebuilds #app wholesale on each state
+// change, so a dialog living in there would be torn out from under itself the
+// first time a filter or a sort moved.
+//
+// The shell owns the frame - scrim, scroll lock, Escape, outside-click - and
+// pages hand it their own body and controls. Nothing here knows what a dialog
+// says, so a new one needs no new lifecycle.
+function openModal(body) {
+  const el = document.getElementById('modal');
+  if (!el) return;
+  el.innerHTML =
+    '<div class="mdl-scrim" onclick="closeModal()"></div>' +
+    '<div class="mdl-box" role="dialog" aria-modal="true" aria-labelledby="mdl-t" tabindex="-1">' + body + '</div>';
+  el.hidden = false;
+  // The class lands a frame later so the entry transition has both ends to run
+  // between; adding it in the same task would render the box already settled.
+  requestAnimationFrame(() => el.classList.add('on'));
+  document.body.classList.add('locked');
+  el.querySelector('.mdl-box')?.focus();
+}
+
+function closeModal() {
+  const el = document.getElementById('modal');
+  if (!el || el.hidden) return;
+  el.classList.remove('on');
+  document.body.classList.remove('locked');
+  // Cleared on the way out rather than immediately, so the exit transition is
+  // visible. The `on` re-check is what makes a close-then-reopen in the same
+  // tick land on a still-open dialog instead of blanking it.
+  setTimeout(() => {
+    if (!el.classList.contains('on')) { el.hidden = true; el.innerHTML = ''; }
+  }, 180);
+}
+
 const money = (n) => '$' + n.toLocaleString();
 
 const num = (n) => Number(n).toLocaleString();
@@ -383,9 +421,12 @@ function dashMenu(btn) {
 function layout(active) {
   const user = getSession() || { role: 'Guest', name: '', id: null };
   return header(active, user) +
-    '<main id="app"></main><div id="toast"></div>' +
+    '<main id="app"></main><div id="toast"></div><div id="modal" hidden></div>' +
     '<script>(function(){var s=".open";function c(){document.querySelectorAll(".nav-dd"+s+",.dropdown"+s)' +
     '.forEach(function(o){o.classList.remove("open")})}' +
     'document.addEventListener("click",function(e){if(!e.target.closest(".nav-dd")&&!e.target.closest(".dropdown"))c()});' +
-    'document.addEventListener("keydown",function(e){if(e.key==="Escape")c()});})();<\/script>';
+    // Escape closes a modal outright rather than through the dropdown sweep: a
+    // dialog is the thing the reader is looking at, so it goes first.
+    'document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(!document.getElementById("modal").hidden){closeModal();return}c()}});' +
+    '})();<\/script>';
 }

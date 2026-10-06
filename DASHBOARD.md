@@ -8,7 +8,7 @@ the exact formula behind it and the column of the source export it comes from.
 | Source | `Claim_202609281521.csv` — 31,235 claims, 2010‑2026, exported 28 Sep 2026 |
 | Generated data | `data.js` (2.6 MB, do not hand‑edit) — rebuild with `node build-data.js` |
 | UI | `dashboard.html` (this page), `admin-dashboard.html`, `claims.html`, `orders.html`, `claim-detail.html` |
-| Shared helpers | `app.js` — session, layout, `num` `usd` `money` `pct`, collapsible groups |
+| Shared helpers | `app.js` — session, layout, `num` `usd` `money` `pct`, the pop‑up shell (`openModal` / `closeModal`), collapsible groups |
 | Styling | `style.css` |
 
 **Nothing on the dashboard is estimated or modelled** except claim ownership, which is
@@ -80,33 +80,78 @@ picker next to it and in the subtitle.
 
 Every card is the same six parts, whatever its origin:
 
-| Part | Notes |
+| Item | Notes |
 |---|---|
 | Priority tag | **Do First** (red), **Do Next** (amber), **Review** (purple) |
 | Source tag | **AI Insight** (purple) or **Metric** (gray) |
 | Headline number | large, bold, tabular — a claim count |
 | Label | short name of the item |
 | Context line | one line of supporting detail |
-| Action button | a verb, not "See" — the button opens the open‑claims table, so the verb names what you will find there |
+| Verb | a verb, not "See" — it opens the card's **detail pop‑up**, so it names what you will be shown |
+| Table link | *View in table* — leaves the dashboard for `claims.html` with the card's scenario already applied. Absent where that page cannot express the scenario, and the pop‑up then says why |
 
 Cards are flat: thin border, a 4px left accent in the priority colour, no gradient, no shadow.
 The grid is three across on desktop, two under 900px, one under 600px. Buttons sit on a common
 baseline in every row (flex column + `margin-top:auto`).
 
+**The whole card opens the pop‑up.** It is a `div` rather than an anchor because it carries a
+second control, and a control inside an anchor is invalid HTML and not reliably clickable. The
+stretched `::after` on `.ac-jump` makes the card behave like a link; `.ac-act` sits above it on
+its own `z-index` and passes pointer events through except on the table link itself.
+
 **Sorting is by priority, and only by priority** — `prio` ascending, then `w` (weight) to break
 ties inside a tier. The source is a label, never a sort key. 2026, admin view, renders as:
 
-| # | Priority | Source | Card | n | Action |
-|---|---|---|---|---|---|
-| 1 | Do First | AI Insight | Recurring issue | 845 | Investigate pattern |
-| 2 | Do First | Metric | Awaiting action | 819 | Review entries |
-| 3 | Do Next | AI Insight | High‑value impact | 377 | Investigate pattern |
-| 4 | Do Next | AI Insight | Potential CAPA | 701 | Start CAPA review |
-| 5 | Do Next | Metric | Repeat‑claim orders | 404 | Review orders |
-| 6 | Review | AI Insight | Emerging trend | 55 | Investigate pattern |
+| # | Priority | Source | Card | n | Verb opens | Table link goes to |
+|---|---|---|---|---|---|---|
+| 1 | Do First | AI Insight | Recurring issue | 845 | Investigate pattern | `claims.html?ty=Sales+Tax` |
+| 2 | Do First | Metric | Awaiting action | 819 | Review entries | none — see below |
+| 3 | Do Next | AI Insight | High‑value impact | 377 | Investigate pattern | `claims.html?ty=Wrong+Price` |
+| 4 | Do Next | AI Insight | Potential CAPA | 701 | Start CAPA review | `claims.html?ty=(Unclassified)` |
+| 5 | Do Next | Metric | Repeat‑claim orders | 404 | Review orders | `orders.html` |
+| 6 | Review | AI Insight | Emerging trend | 55 | Investigate pattern | `claims.html?ty=Wrong Charges(Did Not Follow Quote)` |
 
 Note the interleave: Do First is AI‑then‑metric, Do Next is AI‑then‑metric, Review is AI. If the
 feed were still grouped by origin, rows 1–3 would all be AI cards.
+
+### The detail pop‑up
+
+The verb and the table link do different jobs, and the pop‑up is what makes that worth having
+rather than a hassle. A reader who wants to *understand* a number should not have to leave the
+page and filter a table to get there; a reader who wants the *rows* should not have to read the
+explanation first. So the card explains, and the link is the way out of it.
+
+| Part | Contains |
+|---|---|
+| Title | the card's label, with its priority and source tags |
+| Subtitle | the card's context line, verbatim |
+| **Why this number** | one sentence on how the headline was measured — the part a card has no room for. Card number and context line are facts; this is the definition behind them |
+| Figures | a two‑column fact list: claims, credit, share of the year, months it appears, how many are still open |
+| Composition | top‑5 bar groups, scaled to the largest row rather than to the total — "which one is biggest", not "which fraction" |
+| Footer | the table link where one exists, otherwise the sentence explaining why there is not one; plus Close |
+
+Every figure in it is read off the same `stats` block and the same year‑scoped, owner‑scoped
+queue the card was built from, so the pop‑up cannot drift from the card that opened it. The
+"still open" figures inside are a **subset** of the card's number, not the same thing: the card
+counts the whole year, the queue only what still needs work, and the pop‑up states both.
+
+The frame is shared by every pop‑up on the site: `openModal(body)` / `closeModal()` in `app.js`,
+one `#modal` host, scrim click, Escape, `body.locked` scroll lock, `role="dialog"`
+`aria-modal="true"` `aria-labelledby="mdl-t"`, and an 180ms exit transition before the host is
+cleared. The re‑check on close (`if (!el.classList.contains('on'))`) is what makes a
+close‑then‑reopen in the same tick land on a still‑open dialog instead of blanking it.
+
+**A department or carrier row opens the same pop‑up.** Both tables used to hand off to the
+open‑claims table, which no longer lives on this page, so a row that silently did nothing would
+be worse than not offering the interaction at all. Their figures come from the rows the tables
+above are built from, so the pop‑up is a re‑reading of the row rather than a second source.
+
+| Row | Offers | Because |
+|---|---|---|
+| Department | *View in table* → `claims.html?de=…` | `de` is a real claims‑page filter |
+| Carrier | none, and says so | the export has no Carrier column, so there is nothing there to filter by |
+| **Awaiting action** card | none, and says so | `claims.html` has no entry‑not‑finished column, and status `Open` is a **different** population — a resolved claim can still carry an unfinished entry. A link to the wrong population is worse than no link |
+| **Repeat‑claim orders** card | *View orders* → `orders.html` | the population is orders, and it is labelled as orders rather than as "the table" |
 
 ### AI Insight cards
 
@@ -142,20 +187,19 @@ in use on `departments.html`, which still renders its own four cards in the olde
 
 ### Metric cards
 
-Every count here is the exact number of rows the card's filter opens, so the feed and the table
-below cannot disagree. Only work that is **still outstanding** earns a card. Whole‑year totals
-used to sit in this group too, but they carry no action and have no filter to open, so they are
-absent here and appear once each in the **stat line** under the page title.
+Only work that is **still outstanding** earns a card. Whole‑year totals used to sit in this group
+too, but they carry no action and have nothing to open, so they are absent here and appear once
+each in the **stat line** under the page title.
 
-| Card | Priority | Big number is | Counted from | Context line | Link filters by |
+| Card | Priority | Big number is | Counted from | Context line | Opens / links to |
 |---|---|---|---|---|---|
-| **Awaiting action** | Do First | entry not finished | `ClaimEntryFinished ≠ 1` | % of intake · entry not marked finished | flag `Entry not finished` |
-| **Repeat‑claim orders** | Do Next | claims on orders that raised more than one | `repeatClaims` | how many orders · credit on them | flag `Repeat‑claim order` |
+| **Awaiting action** | Do First | entry not finished | `ClaimEntryFinished ≠ 1` | % of intake · entry not marked finished | pop‑up only — the claims table cannot express the flag |
+| **Repeat‑claim orders** | Do Next | claims on orders that raised more than one | `repeatClaims` | how many orders · credit on them | pop‑up, plus *View orders* → `orders.html` |
 
 **There is no "Open claims" card.** It was removed: the same figure is already stated as
 **Still open** in the stat line directly above, so the feed card repeated a number the reader
-had just read and gave it a second, more urgent-looking home. The open‑claim queue is still on
-the page, further down, and every card here still links into it.
+had just read and gave it a second, more urgent‑looking home. The open‑claim table that used to
+sit below the feed was removed for the same reason — see [§8](#8-the-open-claims-table-was-removed).
 
 **There is no "Under investigation" card, because this data has no such state.** The
 `ClaimStatus` column is a numeric code (1, 2, 3, 4) populated on only 145 of 31,235 rows, and
@@ -165,12 +209,11 @@ filled with a proxy. **Awaiting action** is the honest stand‑in for outstandin
 literally an entry someone has not finished.
 
 **The two card kinds count different things, even though they share one queue.** Metric cards
-are volume and status for the year, restricted to what is still open. The AI cards count *all*
-claims of a type in the year — including closed ones — so Recurring issue's 845 is larger than
-Awaiting action's 819 even though both are tagged Do First. That is why the source tag is on the
-card: the number alone cannot tell you whether you are looking at the open queue or at the
-whole year. The table at the bottom is the ground truth for anything still open, and clicking
-any card filters it.
+are volume and status for the year. The AI cards count *all* claims of a type in the year —
+including closed ones — so Recurring issue's 845 is larger than Awaiting action's 819 even
+though both are tagged Do First. That is why the source tag is on the card: the number alone
+cannot tell you whether you are looking at the open queue or at the whole year. The pop‑up
+states both populations side by side rather than leaving the reader to reconcile them.
 
 The panel is scoped to the selected year and to the signed‑in user's caseload.
 
@@ -208,10 +251,10 @@ export) the line reads *No comparable prior period*.
 `.kpi` card family still exists in `style.css` because `orders.html` and `admin-dashboard.html`
 both use it.
 
-**Credit per claim and max single claim were removed earlier.** The average is on the *Open
-claims* card in the feed, and the largest single credit is already visible in the credit
-distribution chart further down. Carrying them here as well was three numbers the reader had to
-reconcile for no extra information.
+**Credit per claim and max single claim were removed earlier.** The average is computed in the
+department row's pop‑up (`Credit per claim`) and in `DEPT_FACTS`, and the largest single credit
+is already visible in the credit distribution chart further down. Carrying them here as well was
+three numbers the reader had to reconcile for no extra information.
 
 ## 3. This Year vs Last Year
 
@@ -258,10 +301,12 @@ naming the area carrying the most claims. The breakdown list is `flex:1` with
 `align-content:space-evenly`, so when a year has only two or three areas the extra height is
 shared out between the rows rather than pooling underneath them.
 
-**AI insight cards link to the claim-type list.** A card that names a claim type carries a
-*View in table ↓* control. It expands the list if the type is below the top 10, scrolls to the
-row, and flashes it. A card whose type is not in the year's list at all shows no control, so
-there is no dead link.
+**AI insight cards deep‑link to the claims table.** A card that names a claim type carries a
+*View in table* control that leaves the dashboard for `claims.html?ty=…`, with the scenario
+already applied and a banner naming it. It used to scroll the Top claim types list and flash
+the row instead; that mechanism is gone with the flash highlight, and a link that navigates is
+the better of the two — a reader who wants the rows ends up somewhere they can act on them
+rather than back at a bar chart with one row circled.
 
 Departments are rolled into six **team areas** so the mix is readable:
 
@@ -376,7 +421,8 @@ reporting `aria-sort`, so a screen reader is told which order it is reading.
 denominator under 10, because 1 of 1 is 100% and reads as a crisis. A table cannot drop rows
 without hiding departments, so instead the figure goes muted, the bar goes flat, and the row's
 tooltip names the base it is off. The rate turns red when it is above the average across the
-current scope. Clicking a row filters the queue to that department.
+current scope. Clicking a row opens that department's detail pop‑up, whose footer links to
+`claims.html?de=…`.
 
 ## 6. Carrier Scorecard
 
@@ -498,34 +544,31 @@ A five‑band split (`$50‑250`, `$250‑1k`, `$1k‑5k`, `$5k‑25k`, `$25k+`)
 revision. It answered no question anyone was asking: it split the small claims four ways
 while the money sits in a single band above $500.
 
-## 8. Open Claims
+## 8. The Open Claims table was removed
 
-Every claim in the selected year that still needs work. Resolved claims are deliberately
-excluded from the whole dashboard.
+The card at the bottom of the page, holding every claim in the selected year that still needs
+work, is gone. What replaced it is not a smaller table — it is the pop‑up in
+[§1](#the-detail-pop-up) plus a set of deep links into `claims.html`.
 
-**The year and the open‑claim total are printed exactly once**, in the card title
-(`Open Claims — 751 in 2026 · your caseload`). The banner above the table used to repeat both,
-and the toolbar then repeated the count a third time as `751 / 751`, so the same figure appeared
-four times within one screen. Now:
+**Why.** The page already stated the figure twice — once as the **Still open** stat and once as
+the table's own count — and then a third time in a caption explaining that the two numbers were
+not the same, because the queue is the wider population (it holds denied, cancelled and
+never‑finished entries, all of which are still work somebody has to close out). A table that
+needed a paragraph to explain its own total was carrying its weight in prose. Every group of it
+(a card filter, a department row, a carrier row) was also a different route to the same place,
+and after the pop‑up existed they all had somewhere better to go.
 
-- **Resting state** — no banner at all. The toolbar's row counter is hidden too.
-- **Search or a card filter active** — the banner shows only the active filter and the button
-  that clears it, and the toolbar shows `N of 751 shown`.
+**What the dashboard does now, instead:**
 
-**The card carries a caption, because its row count is not the stat line's number.** The two are
-different populations and the page now says so instead of leaving the reader to find the
-discrepancy:
+| Reader wants | Do this |
+|---|---|
+| to understand a card's number | click the card — the pop‑up gives the definition, the figures, and the composition |
+| the claims behind a card | click *View in table*, which opens `claims.html` with the scenario applied |
+| the claims behind a department | the department row's pop‑up, then its footer link |
+| to work the queue | `claims.html`, which is the page that owns a sortable, grouped, paginated claim list |
 
-> Showing all 845 open cases in 2026. The "Still open" figure at the top of the page (751) counts
-> only claims not marked resolved, so this table is 94 wider — it also holds denied, cancelled and
-> never‑finished entries.
-
-The gap is the flags below minus the unresolved flag: 751 unresolved plus the denied, cancelled
-and entry‑not‑finished claims. It is computed, not typed, and it reads 0 when a scope happens to
-have no such claims.
-
-A claim is in the queue when **any** of these is true — flags therefore overlap, and one
-claim can appear under more than one group:
+The flags the queue was grouped by still exist — they are what the pop‑up breaks the open slice
+down by, and they are unchanged:
 
 | Flag | Condition |
 |---|---|
@@ -536,29 +579,27 @@ claim can appear under more than one group:
 | Repeat-claim order | the claim's `OrderID` raised more than one claim **anywhere in the 2010‑2026 file**, not just in the selected year |
 | Unassigned Department | `ClaimDept` is blank |
 
-| Column | Field | Source |
-|---|---|---|
-| Claim | `id` | `Claim#` |
-| Order | `o` | `OrderID` |
-| Claim Type | `ty` | `ClaimType`, `(Unclassified)` when blank |
-| Dept | `de` | `ClaimDept`, `(Unassigned)` when blank |
-| Owner | `own` | routed — [see below](#ownership-model). Admin only |
-| Status | `st` | derived: denied → `Denied`, else cancelled → `Cancelled`, else resolved → `Resolved`, else `Open` |
-| Credit | `am` | `CreditAmount` |
-| Root cause | `reasons` | the flags above |
-| Raised | `date` | `ClaimDate` |
+### `claims.html` accepts a scenario on the URL
 
-Grouping (collapsed, loaded on first open): **Flag**, **Department**, **Team area**,
-**Claim type**, **Status**. Long tails collapse into an "Other" group; long lists paginate at
-200 rows with a *show all* control.
+Six keys, which are exactly the ones its own toolbar writes, so a link and the page cannot
+disagree about what a scenario is: `st`, `ty`, `de`, `pr`, `own`, `q`. A key this page does not
+filter on is ignored rather than silently applied — a broken link should look broken.
 
-**A card filter overrides the grouping, and the dropdown is disabled while it does.** A card
-opens exactly one group — the one whose key equals the active filter — so the grouping has to
-be the axis the filter is on: an AI card filters by claim type, a metric card by flag. Left on
-the reader's own axis, the filter's key is in no bucket, `groupedTable` opens nothing, and the
-jump scrolls down to a table of collapsed headers with no rows under them. The dropdown shows
-the grouping actually in force and says *following the filter above*; **Clear** restores the
-choice it replaced.
+When the page was opened with a scenario it shows a **Scenario from the dashboard** banner: the
+active filters, the match count, and a *Clear filters* button. The count is live, so it follows
+the reader editing the filters.
+
+**An arriving value the list does not contain is kept in the dropdown and marked selected.**
+`claims.html` lists the twelve worked examples; the dashboard counts all 31,517 (`DATA_QUALITY.total`).
+A scenario naming a type none of the twelve carry would otherwise drop out of its own `<select>`
+and print the placeholder as if nothing were set. Instead the value is injected into the option
+list, the table prints an empty state naming both populations, and *Clear filters* is next to it:
+
+> No worked example matches type Sales Tax. The dashboard counts this across all 31,517 claims
+> in the export; this table holds the 12 with real narrative content. **Clear the filters**
+
+That is the honest landing for a scenario the sample cannot show, and it is why the table link
+is left on every card rather than being hidden whenever the sample has no matching row.
 
 ---
 
@@ -675,10 +716,10 @@ Derivation and the 1,640 / 353 counts are in [§6](#6-carrier-scorecard).
 | `memo` `memoDate` `memoAmt` | Credit memo details |
 | `rdate` | `ClaimResolvedDate` |
 | `forInv` | `CreditForInvoiceNo` |
-| `ca` | Carrier name or `""` — see §6. Lets a carrier row in the scorecard filter the queue with the same `jump('ca', …)` the department and claim-type rows use. |
+| `ca` | Carrier name or `""` — see §6. Lets a carrier row in the scorecard narrow the queue with the same filter it uses everywhere else. |
 
-The dashboard filters this queue to the selected year, which is why every count on the page
-matches the table.
+The dashboard filters this queue to the selected year. The card pop‑ups break their slice down
+by it, and the *View in table* links hand the equivalent scenario to `claims.html`.
 
 ### Supporting tables
 
@@ -784,7 +825,7 @@ apart. Nothing else should write to `data.js`.
 | Cost chart | Two bars per location, **no x‑axis labels** | Two labelled bars per department, plus the credited‑but‑not‑memoed gap |
 | Rate per location | Count only | Three rates per department, sorted, with a scope average |
 | Colours | Red/blue/green mean different things in different charts | One palette, one meaning per chart |
-| Next step | None — the report is read‑only | Every finding is a button that opens the exact claims |
+| Next step | None — the report is read‑only | Every finding opens a pop‑up that explains it, and every claim‑type and department finding links to the claims already filtered |
 | Root cause / repeat / untyped | Not shown | Ranked, measured, and clickable |
 | Closed claims | Mixed in | Excluded everywhere |
 | Auditability | Unknown provenance | Every number traceable to a column, regenerated by a script |

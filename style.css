@@ -343,9 +343,6 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ncard.p1{border-left-color:var(--er)}
 .ncard.p2{border-left-color:var(--wn)}
 .ncard.p3{border-left-color:#7c6cf0}
-/* Selection, not decoration: this is the card the open-claims table is currently
-   filtered to, so it has to be findable at a glance. */
-.ncard.sel{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
 .ac-v{display:block;font-size:12px;color:var(--mu);margin-top:7px;line-height:1.45}
 /* The card is a div now, so the primary jump is a stretched link rather than the
    card element itself; the action row sits above it to stay clickable. */
@@ -368,16 +365,14 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
    how much of the card is live. */
 .ncard .ac-jump:focus-visible{outline:none}
 .ncard:has(.ac-jump:focus-visible){border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.16)}
-/* Secondary control on the same card: steps out of the queue and lands on the
-   named row in Top claim types instead. Text-only, so it cannot be mistaken for
-   the primary verb. */
-.ac-view{border:0;background:none;padding:5px 0;font:inherit;font-size:12px;font-weight:600;color:var(--mu);cursor:pointer;transition:color .15s}
+/* Secondary control on the same card: leaves the dashboard for the claims table
+   with this card's population already applied. Text-only, so it cannot be
+   mistaken for the primary verb - an anchor now, not a button, because it is a
+   real navigation and has to behave like one (middle-click, open in new tab,
+   a URL in the status bar). */
+.ac-view{border:0;background:none;padding:5px 0;font:inherit;font-size:12px;font-weight:600;color:var(--mu);cursor:pointer;text-decoration:none;transition:color .15s}
 .ac-view:hover{color:var(--pr-d);text-decoration:underline}
 .ac-view:focus-visible{outline:2px solid var(--pr);outline-offset:2px;border-radius:4px}
-
-/* Flashes the row a "View in table" link landed on. */
-@keyframes rowflash{0%,100%{background-color:transparent}18%,72%{background-color:color-mix(in srgb,var(--pr) 24%,transparent)}}
-.hb.flash{animation:rowflash 1.9s ease-in-out;border-radius:8px}
 
 /* ---- dashboard: sortable comparison table ---- */
 /* Count, credit and rate as columns of one row. Measures sit in a fixed-width
@@ -422,8 +417,55 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ctable .mb i.hi{background:var(--er)}
 .ctable .mb i.thin{background:var(--bd2)}
 
-/* Ties the open-claims table to the "Still open" figure in the stat line. */
-.ocap{margin:0 0 2px;font-size:12px;line-height:1.5}
+/* ---- modal ---- */
+/* One shell for every dialog in the app. Above the dropdown menus (z-index 60)
+   because a dropdown opened behind a dialog is unreachable, and the page behind
+   is frozen with a scroll lock so the dialog is the only thing that can move.
+   Everything is token-driven, so the dark theme needs no second rule. */
+#modal{position:fixed;inset:0;z-index:80}
+#modal[hidden]{display:none}
+.mdl-scrim{position:absolute;inset:0;background:rgba(16,24,40,.44);animation:fade .18s ease both}
+.mdl-box{position:relative;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 64px);overflow:auto;margin:40px auto;background:var(--card);border:1px solid var(--bd);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 24px 60px -24px rgba(16,24,40,.42);animation:mdlin .2s cubic-bezier(.2,.8,.3,1) both}
+@keyframes mdlin{from{opacity:0;transform:translateY(-10px) scale(.985)}to{opacity:1;transform:none}}
+/* The dialog takes focus on open so Escape and Tab land inside it rather than
+   resuming at the card that opened it, which is now behind a scrim. The ring is
+   suppressed: the frame is already the focus surface and the default outline
+   traces a box around the box. */
+.mdl-box:focus{outline:none}
+body.locked{overflow:hidden}
+.mdl-hd{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--bd)}
+.mdl-hd .mdl-n{flex:1;min-width:0}
+.mdl-hd h3{margin:0;font-size:15px;letter-spacing:-.01em}
+.mdl-hd .mdl-sub{display:block;font-size:12px;color:var(--mu);margin-top:3px;line-height:1.45}
+.mdl-x{border:0;background:none;color:var(--mu);font:inherit;font-size:20px;line-height:1;cursor:pointer;padding:0 2px;border-radius:6px;flex:none}
+.mdl-x:hover{color:var(--tx)}
+.mdl-x:focus-visible{outline:2px solid var(--pr);outline-offset:2px}
+.mdl-bd{padding:16px 20px}
+/* What the number is, how it was measured, and which slices make it up. The
+   figures are a two-up grid rather than a list: a dialog is narrow, and a
+   single column of six label/value pairs reads as a form. */
+.mdl-why{margin:0 0 14px;font-size:12.5px;line-height:1.55;color:var(--tx);background:color-mix(in srgb,var(--bg) 60%,transparent);border:1px solid var(--bd);border-radius:12px;padding:10px 12px}
+.mdl-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0 0 16px}
+.mdl-facts div{display:grid;gap:1px;min-width:0}
+.mdl-facts dt{font-size:11px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.mdl-facts dd{margin:0;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.mdl-grp{margin-top:14px}
+.mdl-grp>h4{margin:0 0 7px;font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+/* Composition bars, scaled to the largest row rather than to the total: the
+   question a top-five list answers is "what is the biggest one", not "how much
+   is each one worth out of everything". */
+.mdl-row{display:grid;grid-template-columns:1fr 84px 40px;gap:9px;align-items:center;font-size:12px;margin:5px 0}
+.mdl-row .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mdl-row .bar{height:6px;border-radius:99px;background:var(--bd);overflow:hidden}
+.mdl-row .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(135deg,#818cf8,#4f46e5)}
+.mdl-row b{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.mdl-ft{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:14px 20px 18px;border-top:1px solid var(--bd)}
+.mdl-ft .mu{font-size:11.5px;line-height:1.45;flex:1;min-width:160px}
+@media(max-width:520px){
+.mdl-box{margin:16px auto;border-radius:14px}
+.mdl-facts{grid-template-columns:1fr 1fr}
+.mdl-row{grid-template-columns:1fr 54px 34px}
+}
 
 /* ---- dashboard: team-area donut card ---- */
 /* This card shares a grid row with two ten-row bar lists, so the chart alone
