@@ -394,35 +394,84 @@ Each card also carries that site's top fault by credit, its open share, and a me
 
 ## 5. Department Comparison
 
-One sortable table, `Department | Count | Credit | <rate>`, replacing **three** stacked charts on
-the same department axis. The three views were count‑by‑department, credit‑by‑department and a
-rate chart; they were three ways of reading three columns of the same rows, stacked one under
-another, so comparing a department's volume against its money against its rate meant holding
-three lists at once. The row is now the unit of comparison.
+One sortable table, `Department | Count | Credit | Still Open | Repeat Orders | Credit/Claim`,
+replacing **three** stacked charts on the same department axis. The three views were count‑by‑department,
+credit‑by‑department and a rate chart; they were three ways of reading three columns of the same rows,
+stacked one under another, so comparing a department's volume against its money against its rate meant
+holding three lists at once. The row is now the unit of comparison.
 
-| Column | Source |
-|---|---|
-| Department | `DEPT_FACTS[i][0]`, the export's nine, in reporting order |
-| Count | `d[3]`, claims raised |
-| Credit | `d[6]`, `sum(CreditAmount)` |
-| Rate | the toggle below |
+It then replaced a three‑tab version of that table, which could only ever show one measure in the
+trailing column. A tab swaps the measure instead of adding it, so no two were ever on screen together
+and comparing meant clicking through and remembering. Every measure is a column now and nothing is
+behind a control.
 
-Every column sorts. Clicking the column already sorted on flips the direction; a new column starts
-in the useful direction (names A‑Z, measures largest first). The active column is the only one
-reporting `aria-sort`, so a screen reader is told which order it is reading.
+| Column | Source | Reads as |
+|---|---|---|
+| Department | `DEPT_UNIVERSE`, `DEPT_INDEX`'s nine in reporting order | |
+| Count | `d[3]`, claims raised | volume |
+| Credit | `d[6]`, `sum(CreditAmount)` | cost |
+| Still Open | `d[5]`, claims with `ClaimResolved = 0` | work outstanding |
+| Repeat Orders | `d[9]`, orders that raised more than one claim | how often a fix did not hold |
+| Credit/Claim | `d[6] / d[3]`, 0 where a department raised nothing | average cost per claim |
 
-| Rate toggle | Numerator | Denominator | Reads as |
-|---|---|---|---|
-| Still open | claims with `ClaimResolved = 0` | claims raised | share of the year still open |
-| Repeat orders | orders that raised more than one claim | orders touched | how often a fix did not hold |
-| Cost nothing | claims with `CreditAmount = 0` | claims raised | claims closed with no cost |
+**All nine, every time.** `deptFacts()` returns one row per department that actually raised a claim,
+so the table's population moved with the scope and a department with a quiet year fell out of the
+league entirely — the most misleading thing a ranking can do. It now starts from `DEPT_INDEX`, the
+nine the export declares, and zero‑fills any that are missing from the scope: a department that
+raised nothing reports `0` on every measure, and `Credit/Claim` divides to zero rather than to a
+blank row. Rows dropping out is a property of the filter, not of the departments. `Overseas` is in
+the table permanently and reads `0` throughout, because the export records it as a department with
+no claims; the scope check is the `.filter` in `deptFacts()`, and the manager's row check against
+`u.owner === me.id` is what narrows the nine to a manager's own.
 
-**A thin base is flagged, not hidden.** The rate chart used to drop any department with a
-denominator under 10, because 1 of 1 is 100% and reads as a crisis. A table cannot drop rows
-without hiding departments, so instead the figure goes muted, the bar goes flat, and the row's
-tooltip names the base it is off. The rate turns red when it is above the average across the
-current scope. Clicking a row opens that department's detail pop‑up, whose footer links to
-`claims.html?de=…`.
+The other five team columns in the export — `Inventory`, `Customer`, `Other`, `Scheduling`,
+`Currency` — are not departments and are not listed. `DASHBOARD.md` records them as blank or zero on
+every one of the 31,517 rows (`Currency` blank on all 31,235 shaped rows); they are the CSV's team
+slots, which `build-data.js` collapses into the nine.
+
+**Counts, not rates.** `Still Open` and `Repeat Orders` were percentages of claims raised and orders
+touched. As rates they read unfairly between departments of different sizes — four claims with one open
+scored higher than four hundred with a hundred open — and the table needed a separate thin‑base caveat
+to admit the denominator was too small to mean anything. Counts compare honestly at any size, and a
+count beside `Count` shows what it costs to be that department. `Credit/Claim` keeps a denominator, but
+it is `Count`, the column beside it, so the reader can see whether the division rests on anything.
+
+**Red marks the peak of each column**, judged only against the other departments on screen. It is a
+per‑column ranking rather than one verdict per department: a department at the top on four measures is
+marked on all four, and reading which of those it is is the point of the table. A column where every
+department ties marks them all, which is the honest reading of a column that separates nobody. The
+highlight travels with the department, so it survives re‑sorting, and it is recomputed per year and per
+scope because the population behind it changes. The marked cell's tooltip names the column and says it
+is the highest of the departments listed.
+
+**Plain figures, no meters.** Each column used to carry a bar scaled to the largest value on screen,
+which made a bar's length a second encoding of the number printed directly above it. Six columns of bare
+figures scan in one pass and leave the eye free to compare down a column. The carrier scorecard keeps
+its bars — that table's figures are harder to hold in memory — and shares `.ctable`, sizing its own
+columns to 132px, while the department table, `.dcomp`, sizes its six by percentage.
+
+**Widths are shared, not stacked.** With no bar to fill them, the figures were inheriting `.ctable td.n`'s
+132px — and a column holding a fixed width takes no share of the table's slack, so every spare pixel
+went into the one column that had no width set. At a 1440 viewport that column ran to 608px to hold an
+84px name, leaving **554px of blank between a department and its own first figure** against 53–109px
+between the figures themselves: a hole, not a column. `.dcomp` gives the label 12% and each figure 17.6%
+(12 + 5 × 17.6 = 100), and equal shares are the point — they give every figure column the same slack
+while holding the label to just over its longest name, so the gap after it is that slack plus the label's
+own, about the same as every other gap rather than four times it. The result is gaps of 158–193px, a
+36px spread against the 501px spread it replaced. Percentages rather than pixels so the balance survives
+a resize, and every column still floors at its own minimum content, so a narrow screen shrinks the table
+into `.tw`'s horizontal scroll instead of clipping a header.
+
+Header buttons take `all:unset`, which also resets `box-sizing` — so `width:100%` plus 14px of horizontal
+padding rendered each header 28px wider than its own `<th>`. Right‑aligned headers sat 14px past the
+figure they head, spilled into the next column, and added a 28px scrollbar to a card whose table
+otherwise fit. Restating `box-sizing:border-box` after the `all:unset` puts every header back on the same
+edge as its number, in both comparison tables.
+
+Every column sorts. Clicking the column already sorted on flips the direction; a new column starts in the
+useful direction (names A‑Z, measures largest first), and the page opens on `Count` descending. The
+active column is the only one reporting `aria-sort`, so a screen reader is told which order it is reading.
+Clicking a row opens that department's detail pop‑up, whose footer links to `claims.html?de=…`.
 
 ## 6. Carrier Scorecard
 

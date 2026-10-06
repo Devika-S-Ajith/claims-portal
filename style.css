@@ -375,13 +375,22 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ac-view:focus-visible{outline:2px solid var(--pr);outline-offset:2px;border-radius:4px}
 
 /* ---- dashboard: sortable comparison table ---- */
-/* Count, credit and rate as columns of one row. Measures sit in a fixed-width
-   column on the right with the value over a share bar, so the eye can scan a
-   column vertically and compare departments down the page. */
+/* Shared by the department comparison and the carrier scorecard. Both put every
+   measure in its own column of one row so the eye can scan a column vertically
+   and compare down the page. They differ in how a figure is dressed: the carrier
+   scorecard carries the value over a share bar, the department table dropped its
+   bars, so the two size their measure columns differently - see .dcomp below. */
 .ctable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
 .ctable th,.ctable td{padding:9px 14px;border-bottom:1px solid var(--bd);vertical-align:middle}
 .ctable thead th{padding:0;border-bottom:1px solid var(--bd2);position:relative}
-.ctable thead th button{all:unset;display:flex;align-items:center;gap:5px;width:100%;padding:9px 14px;cursor:pointer;font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.ctable thead th button{all:unset;display:flex;align-items:center;gap:5px;width:100%;box-sizing:border-box;padding:9px 14px;cursor:pointer;font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+/* box-sizing has to be restated after all:unset, which resets it to
+   content-box. With width:100% and 14px of horizontal padding on a content-box
+   element, the button rendered 28px wider than its th: it spilled into the next
+   column, pushed every right-aligned header 14px past the figure it heads, and
+   added a 28px horizontal scrollbar to the card for a table that otherwise fit.
+   border-box puts the header text back on the same right edge as the number
+   below it, which is the alignment the two comparison tables depend on. */
 /* A numeric column is read off its right edge, so its header label is packed
    right as well. text-align on the th cannot do this - the header is a flex
    button, and text-align does not lay out flex items - so the packing is set
@@ -405,16 +414,47 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ctable td.name{font-weight:600;color:var(--tx);white-space:nowrap}
 .ctable td.n{width:132px;text-align:right;white-space:nowrap}
 .ctable td.n b{display:block;font-variant-numeric:tabular-nums;font-weight:600}
-.ctable td.n b.hi{color:var(--er)}
-/* A rate off a base too small to read: present, but not dressed as a verdict. */
+/* A count off a base too small to read: present, but not dressed as a verdict. */
 .ctable td.n b.thin{color:var(--mu);font-weight:500}
+/* The peak of a column, marked on the figure and not on the cell. A tinted whole
+   cell makes two columns that peak on the same row run together into one band
+   across the table; a chip around each number keeps them two separate findings.
+   The chip's horizontal padding is pulled back out with a matching negative
+   margin, so a marked figure and an unmarked one in the same column still sit on
+   exactly the same right edge - otherwise the highlight itself would be the thing
+   shifting a column you are meant to be comparing. */
+.ctable td.n.hi b{background:color-mix(in srgb,var(--er) 14%,transparent);color:var(--er);border-radius:5px;padding:2px 6px;margin:0 -6px}
+/* The department table's figures have no bar under them, so nothing here
+   inherits the 132px the carrier scorecard's metered columns are pinned to - and
+   pinning them at all is what filled this table with dead space. A column given
+   a fixed width holds it and takes no share of the table's slack, so every spare
+   pixel went into the one column that had none: at 1440 wide the Department
+   column ran to 608px holding an 84px name, leaving 582px of blank between a
+   department and its own first figure, against 67-123px between the figures
+   themselves.
+
+   Widths go on the header cells as well as the body cells, because an auto table
+   sizes its columns from the first row - set on the body cells alone, the header
+   overrides them. The split is 12% for the label and 17.6% for each of the five
+   figures (12 + 5 x 17.6 = 100), and equal shares are the point: they give every
+   figure column the same slack, while the label is held to just over its longest
+   name, so the gap after it is that slack plus the label's own - about the same
+   as every other gap rather than four times it.
+
+   Percentages rather than pixels so the balance survives a resize, and each
+   column still floors at its own minimum content, so a narrow screen shrinks the
+   table into .tw's horizontal scroll instead of clipping a header. */
+.ctable.dcomp thead th:first-child, .ctable.dcomp td.name{width:12%}
+.ctable.dcomp thead th.r, .ctable.dcomp td.n{width:17.6%}
+/* display:block exists only to stack a bar under the number; with no bar it
+   would fill the cell and drag the highlight chip across the whole column. */
+.ctable.dcomp td.n b{display:inline-block}
 /* The carrier scorecard's six reason columns are counts and a share, with no
    meter under them, so they need far less room than the 132px measure columns -
    which carry a bar. At 132px each the six alone would be wider than the card. */
 .ctable td.n.rs{width:96px}
 .ctable .mb{display:block;height:4px;margin-top:5px;border-radius:3px;background:var(--bd);overflow:hidden}
 .ctable .mb i{display:block;height:100%;border-radius:3px;background:var(--pr);transition:width .25s}
-.ctable .mb i.hi{background:var(--er)}
 .ctable .mb i.thin{background:var(--bd2)}
 
 /* ---- modal ---- */

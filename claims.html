@@ -237,7 +237,7 @@
               <td>${money(c.am)}</td>
               <td>${aiSuggestion(c, i)}</td>
               <td>${badge(c.pr)}</td>
-              <td>${no ? `<a class="btn s" href="claim-detail.html?id=${no}">Open</a>` : ''}</td>
+              <td>${no ? `<a class="btn s" href="claim-detail.html?id=${no}" title="View claim #${no}" aria-label="View claim ${no}">View</a>` : ''}</td>
             </tr>`;
         }).join('') || empty;
       // The pager is part of the result, not part of the page frame: a filter can

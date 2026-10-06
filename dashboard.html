@@ -43,9 +43,10 @@
 
     let year = LATEST_YEAR;
     let typesExpanded = false;
-    let rateMetric = 'open';
-    // Department comparison used to be three charts; it is one sortable table now.
-    // deptSort is the active column, deptDir the direction within it.
+    // Department comparison used to be three charts, then one table behind a
+    // measure picker; it is one table with a column per measure now, so there is
+    // no rate to remember between renders. deptSort is the active column, deptDir
+    // the direction within it, and the page opens on Count descending.
     let deptSort = 'count';
     let deptDir = -1;
     // 'amount' or 'share' for the ranked credit bars under Where the Money Goes.
@@ -78,11 +79,28 @@
       return (CLAIM_STATS_BY_YEAR_OWNER[y] || {})[me.id] || zeroBlock('No ' + y + ' claims for ' + me.id);
     }
 
+    // The nine departments the portal reports on, in reporting order, with the
+    // owner each is routed to. Read off DEPT_INDEX rather than asserted here, so
+    // the list cannot drift from the export.
+    const DEPT_UNIVERSE = DEPT_INDEX.map(([key, , , owner]) => ({ key, owner }));
+
     // [dept, owner, area, claims, orders, open, credit, openCredit, memo, repeatOrders, noCredit]
     function deptFacts() {
       const bucket = DEPT_FACTS[year] || DEPT_FACTS.all || { all: [] };
       const me = getSession();
-      return isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
+      const rows = isAdmin() ? (bucket.all || []) : (bucket[me.id] || []);
+      const byName = new Map(rows.map((r) => [r[0], r]));
+      const scope = isAdmin() ? null : me.id;
+      // Every department in scope is listed, including one that raised nothing
+      // this year. Dropping it would claim the department does not exist, which
+      // is a different claim from "raised no claims" - and a department with no
+      // rows in any year, like Overseas, would otherwise disappear from the page
+      // altogether. The fill row is zeros throughout, so its figures and its
+      // pop-up read off the same row shape as a populated one rather than
+      // special-casing emptiness downstream.
+      return DEPT_UNIVERSE
+        .filter((u) => scope === null || u.owner === scope)
+        .map((u) => byName.get(u.key) || [u.key, u.owner, areaOfDept(u.key), 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     // [name, claims, orders, open, openCredit, credit, damageClaims, medianDays, p90Days, timedCloses]
@@ -342,28 +360,49 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           </div>`).join('');
     }
 
-    // One table for all three department measures. Count, credit and rate used to
-    // be three separate charts on the same department axis, stacked one under the
-    // other, so a reader comparing a department's volume against its money
-    // against its rate had to hold three lists in their head. Here they are
-    // three columns of one row, and the row is the unit of comparison.
-    // Every column sorts; the rate column follows whichever rate is selected.
-    // The rate used to be a chart that dropped any department with a denominator
-    // under 10, because 1 of 1 is 100% and reads as a crisis. A table cannot drop
-    // rows without hiding departments, so a thin base is flagged instead: the
-    // figure goes muted, the bar goes flat, and the title says what it is off.
-    const THIN_BASE = 10;
-    function deptTable(df, rk, rateAvg) {
-      const rows = df.map((d) => ({
-        dept: d[0],
-        count: d[3],
-        credit: d[6],
-        of: rk.of(d),
-        den: rk.den(d),
-        rate: pnum(rk.of(d), rk.den(d))
-      }));
-      const maxC = Math.max(...rows.map((r) => r.count), 1);
-      const maxV = Math.max(...rows.map((r) => r.credit), 1);
+    // One row per department, every measure a column of its own. This replaced a
+    // three-tab control that swapped one measure into a single trailing column, so
+    // comparing a department's volume against its money against its open pile meant
+    // switching tabs and holding the previous reading in your head; and a tab could
+    // only ever show the one measure, so no two were ever on screen together. The
+    // row is the unit of comparison now and no measure is ever behind a toggle.
+    //
+    // Raw counts, not rates. "Still open" as a percentage of claims raised made a
+    // department with four claims and one open look worse than a department with
+    // four hundred and one hundred open, and the tab carried a separate thin-base
+    // caveat to admit it. Counts compare honestly between departments of any size,
+    // and a count next to Count says what it costs to be that department.
+    //
+    // Plain numbers, no meters. Each of the three columns carried a bar scaled to
+    // the largest value on screen, which made the length of a bar a second
+    // encoding of the number printed directly above it - two signals for one value,
+    // and the reader had to trust they agreed. Six columns of bare figures scan in
+    // one pass and leave the eye free to compare down a column rather than across.
+    //
+    // Red marks the peak of each column, judged only against the other departments
+    // on screen. It is a per-column ranking, not one verdict per department: a
+    // department holding the top spot on four measures is marked on all four, and
+    // the point of the table is seeing which of those it is. A column where every
+    // department ties marks them all, which is the honest reading of a column that
+    // does not separate anybody.
+    const DEPT_COLS = [
+      { k: 'count', label: 'Count', of: (d) => d[3], fmt: num },
+      { k: 'credit', label: 'Credit', of: (d) => d[6], fmt: usd },
+      { k: 'open', label: 'Still Open', of: (d) => d[5], fmt: num },
+      { k: 'repeat', label: 'Repeat Orders', of: (d) => d[9], fmt: num },
+      { k: 'per', label: 'Credit/Claim', of: (d) => (d[3] ? d[6] / d[3] : 0), fmt: usd }
+    ];
+
+    function deptTable(df) {
+      const rows = df.map((d) => {
+        const r = { dept: d[0] };
+        DEPT_COLS.forEach((c) => { r[c.k] = c.of(d); });
+        return r;
+      });
+      // Each column's own peak, so no measure is judged on another measure's scale.
+      const peak = {};
+      DEPT_COLS.forEach((c) => { peak[c.k] = rows.length ? Math.max(...rows.map((r) => r[c.k])) : 0; });
+
       const dir = deptDir;
       const sorted = rows.slice().sort((a, b) =>
         deptSort === 'dept' ? dir * a.dept.localeCompare(b.dept) : dir * (a[deptSort] - b[deptSort])
@@ -376,34 +415,24 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           `<span class="car">${on ? (dir === -1 ? '&#8595;' : '&#8593;') : ''}</span></button></th>`;
       };
 
-      // The bar in the rate column is scaled to the largest rate on screen, not to
-      // 100. For the money metric the values run into the thousands of dollars,
-      // so a bar measured against 100 would render every row as a sliver; a
-      // percentage metric still reads correctly against its own maximum.
-      const maxRate = Math.max(...rows.map((r) => r.rate), 1);
       const body = sorted.map((r) => {
-        const thin = r.den < THIN_BASE;
-        const hot = !thin && r.rate > rateAvg;
-        // The rate column is one of three different measures, so the tooltip
-        // names the measure and shows the fraction rather than assuming a
-        // percent. "Open cases in <dept>" was wrong for every metric but one.
-        const tip = `${rk.label} in ${r.dept}: ${rk.fmt(r.rate)}` +
-          ` · ${rk.raw(r.of)} of ${num(r.den)}` +
-          (thin ? ` — a base of only ${num(r.den)} is too small to read` : '');
+        const cells = DEPT_COLS.map((c) => {
+          // A column of all zeros has no peak worth marking, and a zero-summed
+          // column would otherwise paint every row red for being indistinguishable.
+          const top = peak[c.k] > 0 && r[c.k] === peak[c.k];
+          const tip = `${c.label} in ${r.dept}: ${c.fmt(r[c.k])}` +
+            (top ? ` — the highest ${c.label.toLowerCase()} of the ${num(rows.length)} departments listed` : '');
+          return `<td class="n${top ? ' hi' : ''}" title="${esc(tip)}"><b>${c.fmt(r[c.k])}</b></td>`;
+        }).join('');
         return `<tr onclick="openSlice('de','${esc(r.dept)}')" tabindex="0"
-            onkeydown="if(event.key==='Enter'||event.key===' '){openSlice('de','${esc(r.dept)}');return false}"
-            title="${esc(tip)}">
-          <td class="name">${esc(r.dept)}</td>
-          <td class="n"><b>${num(r.count)}</b><span class="mb"><i style="width:${pnum(r.count, maxC).toFixed(1)}%"></i></span></td>
-          <td class="n"><b>${usd(r.credit)}</b><span class="mb"><i style="width:${pnum(r.credit, maxV).toFixed(1)}%"></i></span></td>
-          <td class="n"><b class="${thin ? 'thin' : hot ? 'hi' : ''}">${rk.fmt(r.rate)}</b>
-            <span class="mb"><i class="${thin ? 'thin' : hot ? 'hi' : ''}" style="width:${Math.min(100, pnum(r.rate, maxRate)).toFixed(1)}%"></i></span></td>
+            onkeydown="if(event.key==='Enter'||event.key===' '){openSlice('de','${esc(r.dept)}');return false}">
+          <td class="name">${esc(r.dept)}</td>${cells}
         </tr>`;
       }).join('');
 
-      return `<div class="tw" style="border:0;margin-top:4px"><table class="ctable">
-          <thead><tr>${th('dept', 'Department', 'left')}${th('count', 'Count', 'right')}${th('credit', 'Credit', 'right')}${th('rate', rk.label, 'right')}</tr></thead>
-          <tbody>${body}</tbody>
+      return `<div class="tw" style="border:0;margin-top:4px"><table class="ctable dcomp">
+          <thead><tr>${th('dept', 'Department', 'left')}${DEPT_COLS.map((c) => th(c.k, c.label, 'right')).join('')}</tr></thead>
+          <tbody>${body || `<tr><td colspan="6" class="mu">No departments raised a claim in ${esc(String(year))}.</td></tr>`}</tbody>
         </table></div>`;
     }
 
@@ -713,7 +742,6 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     function setMetric(key) { metric[key] = isMoney(key) ? 'count' : 'value'; render(); }
     function setYear(y) { year = y; typesExpanded = false; render(); }
     function toggleTypes() { typesExpanded = !typesExpanded; render(); }
-    function setRate(k) { rateMetric = k; render(); }
     function setDeptMoney(m) { deptMoney = m; render(); }
     function setCarSort(k) {
       if (carSort === k) carDir = -carDir;
@@ -1217,10 +1245,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
 
       // Caption for the credit bands. It used to read "762 of 4,254 cost
       // nothing", which was a near-duplicate of the "Still open" stat already in
-      // the line above - see the note on RATES below - and it counted claims
-      // while the bars measure credit. This one reads the chart instead: it
-      // names the band carrying the most money, which is the bar drawn in red,
-      // and puts it in share terms.
+      // the line above - and it counted claims while the bars measure credit. This
+      // one reads the chart instead: it names the band carrying the most money,
+      // which is the bar drawn in red, and puts it in share terms.
       //
       // The band figures sum to S.credit, the same "Credit given" total printed
       // in the stat line above, so the denominator reconciles with it rather
@@ -1231,25 +1258,18 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       const distSum = S.dist.reduce((a, d) => a + d[2], 0);
       const topBand = S.dist.length ? S.dist.reduce((a, d) => (Math.abs(d[2]) >= Math.abs(a[2]) ? d : a)) : null;
 
-      // The third column is a ratio the reader picks. Each entry says what to
-      // divide by what, and fmt says how the result is written - two of these
-      // are percentages and one is money per claim, so the unit cannot be
-      // assumed from the arithmetic.
+      // The department columns are declared once, next to deptTable, rather than
+      // built here per render: every measure now sits in its own column at once, so
+      // there is nothing left for the page to choose between and no per-render
+      // lookup to keep in step with the header row.
       //
-      // "Credit per claim" replaced a "cost nothing" tab that showed exactly the
-      // same numbers as "still open". Both counted claims that were open and
-      // uncredited, which in this export are the same claims: a claim stays open
-      // precisely because it has not been credited yet, so open (d[5]) and
-      // noCredit (d[10]) held the same value in 218 of 262 department rows. Two
-      // labels over one number reads as a broken button. Credit per claim is a
-      // different population entirely and is the one a manager can act on.
-      const RATES = {
-        open: { label: 'Still open', of: (d) => d[5], den: (d) => d[3], fmt: (v) => v.toFixed(1) + '%', raw: num },
-        repeat: { label: 'Repeat orders', of: (d) => d[9], den: (d) => d[4], fmt: (v) => v.toFixed(1) + '%', raw: num },
-        credit: { label: 'Credit per claim', of: (d) => d[6], den: (d) => d[3], fmt: (v) => usd(v), raw: (v) => usd(v), money: true }
-      };
-      const rk = RATES[rateMetric];
-      const rateAvg = pnum(df.reduce((a, d) => a + rk.of(d), 0), df.reduce((a, d) => a + rk.den(d), 0));
+      // Worth keeping in mind if a rate is ever added back. "Credit per claim"
+      // replaced a "cost nothing" tab that showed exactly the same numbers as
+      // "still open": both counted claims that were open and uncredited, which in
+      // this export are the same claims, since a claim stays open precisely because
+      // it has not been credited yet. And open (d[5]) against noCredit (d[10]) held
+      // the same value in 218 of 262 department rows - two labels over one number
+      // reads as a broken button.
 
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:6px">
@@ -1316,12 +1336,11 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           </div>
         </div>
 
-        ${sect('Department Comparison', 'Count, credit and rate on one axis — click any column to sort')}
+        ${sect('Department Comparison', 'Every measure is its own column — red marks the highest in each — click any column to sort')}
         <div class="card">
-          ${cardTitle('', '', `<div class="seg" role="group">${Object.entries(RATES).map(([k, v]) => `<button type="button" class="${rateMetric === k ? 'on' : ''}" onclick="setRate('${k}')">${v.label}</button>`).join('')}</div>`)}
-          ${deptTable(df, rk, rateAvg)}
+          ${deptTable(df)}
           <div class="row" style="margin-top:10px">
-            <span class="mu" style="font-size:12px">${esc(rk.label)}: red is above the ${rk.fmt(rateAvg)} average · click a row for its detail</span>
+            <span class="mu" style="font-size:12px">Red marks the highest value in its own column, judged against the other departments listed (ties included) · click a column header to sort · click a row for that department&rsquo;s detail</span>
           </div>
         </div>
 
