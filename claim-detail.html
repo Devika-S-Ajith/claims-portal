@@ -39,6 +39,15 @@
       );
     }
 
+    // 282 rows in the export have free text sitting in the claim-number column -
+    // the legacy Claim# field was overwritten with note text, so those rows carry
+    // no number at all. A page headed "Claim ID" printing that prose reads as a
+    // corrupt identifier, so a real claim number is the only thing shown here.
+    function claimNo(claim) {
+      const s = String(claim && claim.id != null ? claim.id : '').trim();
+      return /^[0-9]+$/.test(s) ? s : '';
+    }
+
     function render() {
       const params = new URLSearchParams(location.search);
       const wanted = params.get('id');
@@ -65,7 +74,7 @@
           <h1 style="margin-bottom:8px">Case not found</h1>
           <div class="card">
             <p class="mu">${wanted
-              ? `No claim matches <b>#${esc(wanted)}</b> in the worked examples.`
+              ? `No claim matches <b>#${esc(wanted)}</b> in the export.`
               : 'No claim was requested. Open a case from your list to see its details.'}</p>
             <div class="row" style="gap:8px;margin-top:12px">
               <a class="btn p s" href="claims.html">Back to my claims</a>
@@ -145,7 +154,7 @@
         <div class="grid g2">
           <div class="card"><h3>1 · Claim Overview</h3>
             <dl class="dl">
-              ${dd('Claim ID', claim.id)}
+              ${dd('Claim ID', claimNo(claim) || `<span class="mu" title="This row has no claim number in the export - the legacy Claim# column holds free text on it.">—</span>`)}
               ${dd('Order ID', claim.or ? `<a style="color:var(--pr)" href="orders.html">${esc(claim.or)}</a>` : '—')}
               ${dd('Order type', or(claim.otype, '—'))}
               ${dd('Claim date', when(claim.date))}

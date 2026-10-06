@@ -733,38 +733,11 @@ console.log('queue rows:', QUEUE_SRC.length);
 // ---------------------------------------------------------------- examples
 // Real claims that actually have narrative content, spread across the four
 // owners and a mix of statuses, so the detail page shows real information.
-const pick = [];
-const wantStatus = ['Under Investigation', 'Open', 'Awaiting Action'];
-const scored = claims.filter((c) => c.desc.length > 40);
-for (const o of OWNERS) {
-  for (const st of ['Open', 'Resolved', 'Cancelled']) {
-    const cand = scored
-      .filter((c) => ownerOf(c.dept) === o.id && c.status === st)
-      .sort((a, b) => {
-        const score = (x) =>
-          (x.rca ? 8 : 0) + (x.capa ? 6 : 0) + (x.sol ? 3 : 0) + (x.memoNo ? 4 : 0) +
-          (x.note ? 2 : 0) + Math.min(6, Math.floor(x.credit / 200));
-        return score(b) - score(a);
-      });
-    if (cand[0]) pick.push(cand[0]);
-  }
-}
-// A denied one if any exist, for the rejected path.
-const deniedRow = claims.filter((c) => c.denied && c.desc.length > 20)[0];
-if (deniedRow) pick.push(deniedRow);
+// Build full set of real claims for listing
+const EXAMPLE_CANDIDATES = claims
+  .filter((c) => c.id && c.id.trim())
+  .map((c) => ({
 
-// The examples are what the detail page can show, so a field that only 0.05% of
-// claims carry would never appear there if left to chance. One claim naming a
-// single carrier and one naming both are forced in, so the carrier is always
-// demonstrable and both readings of the field are visible.
-for (const want of ['UPS', 'UPS/FedEx']) {
-  if (pick.some((c) => c.carrier === want)) continue;
-  const c = claims.filter((x) => x.carrier === want && x.desc.length > 40 && !pick.includes(x))
-    .sort((a, b) => b.credit - a.credit)[0];
-  if (c) pick.push(c);
-}
-
-const EXAMPLES = pick.map((c) => ({
   id: c.id,
   or: c.order,
   ty: c.type,
@@ -788,6 +761,8 @@ const EXAMPLES = pick.map((c) => ({
   ca: c.carrier || null,
   ai: c.rca || c.capa || c.sol ? 'acc' : 'none'
 }));
+
+const EXAMPLES = EXAMPLE_CANDIDATES;
 
 const CLAIM_FINANCIALS = {};
 for (const c of EXAMPLES) {

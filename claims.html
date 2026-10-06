@@ -9,7 +9,7 @@
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script>
-    let filter = { q: '', st: '', pr: '', own: '', de: '', ty: '' };
+    let filter = { q: '', st: '', pr: '', own: '', de: '', ty: '', yr: '' };
 
     // Set when the page was opened with a scenario on it, which is what a card's
     // "View in table" link does: it arrives here with the population it was about
@@ -17,10 +17,19 @@
     // to rebuild the filter from a sentence on the card.
     let carried = false;
 
+    let page = 1;
+    let pageSize = 25;
+    const PAGE_SIZES = [10, 25, 50, 100];
+
+    // The rows on the current page, addressed by position by the AI buttons.
+    // Kept at module scope because a button's only handle on its claim is where
+    // that claim happens to sit right now.
+    let viewRows = [];
+
     // Only this page's own filter keys are honoured. A dashboard link that grows
     // a key this page does not filter on would be silently ignored, which reads
     // as "this scenario has no claims" rather than as a broken link.
-    const PARAM_KEYS = ['st', 'ty', 'de', 'pr', 'own', 'q'];
+    const PARAM_KEYS = ['st', 'ty', 'de', 'pr', 'own', 'q', 'yr'];
 
     function readParams() {
       const p = new URLSearchParams(location.search);
@@ -28,20 +37,60 @@
         const v = (p.get(k) || '').trim();
         if (v) { filter[k] = v; carried = true; }
       });
+      // A link may name any year at all. Only a year the export actually holds is
+      // a filter this page can honour, and an unusable one is dropped rather than
+      // left set, which would show an empty list with no way back.
+      if (filter.yr && !YEARS.includes(Number(filter.yr))) filter.yr = '';
+    }
+
+    // The year the page opens on. Every figure on the dashboards is already cut to
+    // it, so it is also the one cut here that needs no explaining.
+    function defaultYear() {
+      return String(LATEST_YEAR);
     }
 
     // Puts the page back to its unfiltered state, and forgets where it came from
-    // so the banner does not survive the clear.
+    // so the banner does not survive the clear. The year goes back to the default
+    // with everything else: clearing means "show me the page as it opens".
     function clearFilters() {
-      filter = { q: '', st: '', pr: '', own: '', de: '', ty: '' };
+      filter = { q: '', st: '', pr: '', own: '', de: '', ty: '', yr: defaultYear() };
       carried = false;
+      page = 1;
       render();
     }
 
-    // Every list is built from the signed-in user's scope, so a manager can
-    // never see another manager's rows no matter what the filters say.
+    function setFilter(key, v) {
+      filter[key] = v;
+      // Every filter change returns to page 1: staying on page 7 of a list that
+      // now has one page reads as "no results" when there are results.
+      page = 1;
+      renderResults();
+    }
+
+    // A claim's year is the year its ClaimDate falls in. 470 claims carry no date
+    // at all, so they belong to no year and only ever appear under "All years" -
+    // a year cut is a cut on dated claims, not a claim that quietly went missing.
+    function yearOf(c) {
+      return String(c.date || '').slice(0, 4);
+    }
+
+    // Every list is built from the signed-in user's scope, cut to the year on the
+    // toolbar, so a manager can never see another manager's rows no matter what
+    // the filters say.
+    //
+    // This cut is re-derived on every keystroke in the search box and it walks all
+    // 31,517 rows, so the result is cached against the pair that produced it. A
+    // different session or a different year is a different key, which rebuilds.
+    let popKey = '';
+    let popRows = [];
     function inScope() {
-      return scopedClaims();
+      const s = getSession();
+      const key = `${s ? s.role + ':' + s.id : 'none'}|${filter.yr}`;
+      if (popKey !== key) {
+        popRows = scopedClaims().filter((c) => !filter.yr || yearOf(c) === filter.yr);
+        popKey = key;
+      }
+      return popRows;
     }
 
     function matches(c) {
@@ -56,9 +105,73 @@
       );
     }
 
-    function aiSuggestion(c) {
+    // 282 rows in the export have free text sitting in the claim-number column:
+    // the legacy Claim# field was overwritten with note text, so those rows carry
+    // no number at all. Printing that prose under a Claim ID heading reads as a
+    // corrupt identifier rather than as missing data, so a real claim number is
+    // the only thing this cell will print.
+    function claimNo(c) {
+      const s = String(c.id == null ? '' : c.id).trim();
+      return /^[0-9]+$/.test(s) ? s : '';
+    }
+
+    const NO_NUMBER = 'This row has no claim number in the export. The legacy Claim# column holds free text on it, so there is no claim number to open it by.';
+
+    // A page count is not a row count: the last page holds whatever is left, so
+    // it is almost never full. The pager therefore numbers pages, not rows, and
+    // the caption states the row range actually on screen. Clamping here rather
+    // than in a handler means a filter that shrinks the list can never leave the
+    // page pointing past the end.
+    function pageSlice(rows) {
+      const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+      page = Math.min(Math.max(1, page), pages);
+      const from = (page - 1) * pageSize;
+      return { page, pages, from, to: Math.min(from + pageSize, rows.length), rows: rows.slice(from, from + pageSize) };
+    }
+
+    function setPage(n) { page = n; render(); }
+
+    function setPageSize(n) { pageSize = n; page = 1; render(); }
+
+    // Page numbers with the run around the current page kept and the rest
+    // elided - 40 buttons is a worse control than none.
+    function pageButtons(p) {
+      const wanted = new Set([1, 2, p.page - 1, p.page, p.page + 1, p.pages - 1, p.pages]);
+      let out = '';
+      let prev = 0;
+      [...wanted].filter((n) => n >= 1 && n <= p.pages).sort((a, b) => a - b).forEach((n) => {
+        if (n - prev > 1) out += '<span class="pgap" aria-hidden="true">…</span>';
+        out += `<button type="button" class="pgnum${n === p.page ? ' on' : ''}" onclick="setPage(${n})"` +
+          `${n === p.page ? ' aria-current="page"' : ''}>${n}</button>`;
+        prev = n;
+      });
+      return out;
+    }
+
+    function pager(p, total) {
+      if (!total) return '';
+      const one = p.pages < 2;
+      const off = (b) => (one || b ? ' disabled' : '');
+      return `<div class="pager">
+        <span class="mu">Showing ${num(p.from + 1)}–${num(p.to)} of ${num(total)} matching claim${total === 1 ? '' : 's'} · page ${p.page} of ${p.pages}</span>
+        <div class="sp"></div>
+        <select onchange="setPageSize(+this.value)" aria-label="Claims per page" style="font-size:12px;padding:4px 8px">
+          ${PAGE_SIZES.map((n) => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n} per page</option>`).join('')}
+        </select>
+        <button type="button" class="pgnum" onclick="setPage(1)"${off(p.page <= 1)} aria-label="First page">&#171;</button>
+        <button type="button" class="pgnum" onclick="setPage(${p.page - 1})${off(p.page <= 1)}" aria-label="Previous page">&#8249;</button>
+        ${pageButtons(p)}
+        <button type="button" class="pgnum" onclick="setPage(${p.page + 1})${off(p.page >= p.pages)}" aria-label="Next page">&#8250;</button>
+        <button type="button" class="pgnum" onclick="setPage(${p.pages})${off(p.page >= p.pages)}" aria-label="Last page">&#187;</button>
+      </div>`;
+    }
+
+    // The AI buttons address their claim by position on the current page, not by
+    // claim number: 282 of the ids in the export are prose and five of those carry
+    // an apostrophe, which cannot be quoted into an inline handler safely.
+    function aiSuggestion(c, i) {
       if (c.ai === 'none') {
-        return `<button class="btn s" onclick="generateSuggestion('${c.id}')">✨ Generate with AI</button>`;
+        return `<button class="btn s" onclick="generateSuggestion(${i})">✨ Generate with AI</button>`;
       }
       const accepted = c.ai === 'acc';
       const [cause, resolution] = AI_SUGGESTIONS[c.ty] || AI_SUGGESTIONS.default;
@@ -69,21 +182,21 @@
           <div style="margin-top:4px"><b>Resolution:</b> ${resolution}</div>
           ${accepted ? '' : `
             <div class="row" style="margin-top:8px;gap:6px">
-              <button class="btn s p" onclick="acceptSuggestion('${c.id}')">Accept</button>
+              <button class="btn s p" onclick="acceptSuggestion(${i})">Accept</button>
               <button class="btn s" onclick="toast('Edit mode: change text, then Accept')">Edit</button>
               <button class="btn s" onclick="toast('Regenerated')">Regenerate</button>
             </div>`}
         </div>`;
     }
 
-    function generateSuggestion(id) {
-      const claim = CLAIMS.find((c) => c.id === id);
+    function generateSuggestion(i) {
+      const claim = viewRows[i];
       if (claim) claim.ai = 'sug';
       renderResults();
     }
 
-    function acceptSuggestion(id) {
-      const claim = CLAIMS.find((c) => c.id === id);
+    function acceptSuggestion(i) {
+      const claim = viewRows[i];
       if (claim) claim.ai = 'acc';
       toast('AI suggestion accepted');
       renderResults();
@@ -91,23 +204,30 @@
 
     function renderResults() {
       const rows = inScope().filter(matches);
+      const p = pageSlice(rows);
+      viewRows = p.rows;
       const chips = activeChips();
+      // The Owner column is admin-only, so the empty state spans whatever the
+      // header has rather than a fixed count that leaves a gap for a manager.
+      const cols = isAdmin() ? 11 : 10;
       const empty = rows.length
         ? ''
         : carried
-          // A scenario that reached here matched none of the worked examples. The
+          // A scenario that reached here matched none of the claims. The
           // card it came from counted the whole export, so the honest thing is to
           // name both populations rather than print a bare "no claims match",
           // which reads as "this kind of claim does not exist".
-          ? `<tr><td colspan="11" class="mu">No worked example matches ${esc(chips.join(', ') || 'this scenario')}. ` +
+          ? `<tr><td colspan="${cols}" class="mu">No claim matches ${esc(chips.join(', ') || 'this scenario')}. ` +
             `The dashboard counts this across all ${num(DATA_QUALITY.total)} claims in the export; ` +
-            `this table holds the ${num(CLAIMS.length)} with real narrative content. ` +
+            `this table holds ${num(CLAIMS.length)} of them${filter.yr ? `, cut to ${esc(filter.yr)}` : ''}. ` +
             `<button class="btn s" onclick="clearFilters()">Clear the filters</button></td></tr>`
-          : '<tr><td colspan="11" class="mu">No claims in your scope match.</td></tr>';
+          : `<tr><td colspan="${cols}" class="mu">No claims in your scope match.</td></tr>`;
       document.getElementById('results').innerHTML =
-        rows.map((c) => `
+        viewRows.map((c, i) => {
+          const no = claimNo(c);
+          return `
             <tr>
-              <td><b>${c.id}</b></td>
+              <td>${no ? `<b>${no}</b>` : `<span class="mu" style="font-size:11px" title="${esc(NO_NUMBER)}">—</span>`}</td>
               <td>${esc(c.own_by || '—')}</td>
               <td>${c.or}</td>
               <td>${c.ty}</td>
@@ -115,21 +235,28 @@
               ${isAdmin() ? `<td><span class="owner-chip ${(OWNERS.find((o) => o.id === c.own) || {}).role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${esc(ownerName(c.own))}</span></td>` : ''}
               <td>${badge(c.st)}</td>
               <td>${money(c.am)}</td>
-              <td>${aiSuggestion(c)}</td>
+              <td>${aiSuggestion(c, i)}</td>
               <td>${badge(c.pr)}</td>
-              <td><a class="btn s" href="claim-detail.html?id=${c.id}">Open</a></td>
-            </tr>`).join('') || empty;
+              <td>${no ? `<a class="btn s" href="claim-detail.html?id=${no}">Open</a>` : ''}</td>
+            </tr>`;
+        }).join('') || empty;
+      // The pager is part of the result, not part of the page frame: a filter can
+      // change both the row count and the number of pages, so it is rebuilt with
+      // the rows rather than being left describing the list before the filter.
+      const pg = document.getElementById('pager');
+      if (pg) pg.innerHTML = pager(p, rows.length);
       // The banner's match count is a live figure, not a caption: the selects and
       // the search box both re-run this function, and a banner that kept the count
       // it was built with would go stale the moment the reader touched anything.
       const cc = document.getElementById('carriedCount');
-      if (cc) cc.textContent = `· ${rows.length} of ${num(inScope().length)} worked examples match`;
+      if (cc) cc.textContent = `· ${num(rows.length)} of ${num(inScope().length)} claims match`;
       return rows;
     }
 
     // The filters currently narrowing the list, in the toolbar's own reading order.
     function activeChips() {
       const out = [];
+      if (filter.yr) out.push(`year ${filter.yr}`);
       if (filter.st) out.push(`status ${filter.st}`);
       if (filter.ty) out.push(`type ${filter.ty}`);
       if (filter.de) out.push(`department ${filter.de}`);
@@ -141,7 +268,7 @@
 
     function filterSelect(key, options, label) {
       // An arriving scenario can name a value none of the rows in scope carry - the
-      // dashboard counts the whole export, this table lists twelve worked examples.
+      // dashboard counts the whole export, this table lists one year's claims.
       // Dropping the value from the list would print the placeholder as if it were
       // the selection, so the reader would see no filter set while one plainly was.
       // Keep it in the list and let the empty state explain why.
@@ -149,9 +276,20 @@
         ? [...options, filter[key]].sort()
         : options;
       return `
-        <select onchange="filter.${key}=this.value;renderResults()">
+        <select onchange="setFilter('${key}',this.value)" aria-label="${esc(label)}">
           <option value="">${label}</option>
           ${opts.map((x) => `<option ${filter[key] === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}
+        </select>`;
+    }
+
+    // YEARS already runs newest first, so it maps straight into the options. "All
+    // years" is a real choice and not just a reset: it is the only way to reach the
+    // claims that carry no date, and the only way to see the whole export at once.
+    function yearSelect() {
+      return `
+        <select onchange="setFilter('yr',this.value)" aria-label="Claim year">
+          <option value=""${filter.yr ? '' : ' selected'}>All years</option>
+          ${YEARS.map((y) => `<option value="${y}"${filter.yr === String(y) ? ' selected' : ''}>${y}</option>`).join('')}
         </select>`;
     }
 
@@ -159,47 +297,50 @@
       const admin = isAdmin();
       const total = inScope().length;
       const shown = inScope().filter(matches).length;
+      // Every count on this page describes the year on the toolbar, so it is
+      // named rather than left for the reader to work out from the select.
+      const yearNote = filter.yr ? ` in ${esc(filter.yr)}` : ' across all years';
       // Only shown when the page was opened with a scenario on it. The reader
       // arrived here from a card, and a filter they did not set is a filter they
       // need to be told about - with the way out of it in the same row.
       //
       // It also carries the matching count, because the card that sent the reader
-      // here counts the whole export while this table holds a dozen worked
-      // examples. Without the count, "845 claims" on the card and "2 rows" on this
-      // page read as two pages disagreeing about the same number. They are not:
-      // one is the population, this is the sample drawn from it.
+      // here counts the whole export while this table is cut to one year. Without
+      // the count, "845 claims" on the card and "40 rows" on this page read as two
+      // pages disagreeing about the same number.
       const banner = carried
         ? `<div class="row" style="margin:2px 0 14px">
              <span class="b High">Scenario from the dashboard</span>
              <span class="mu" style="font-size:12px">${esc(activeChips().join(' · '))}</span>
-             <span class="mu" style="font-size:12px" id="carriedCount">· ${shown} of ${num(total)} worked examples match</span>
+             <span class="mu" style="font-size:12px" id="carriedCount">· ${num(shown)} of ${num(total)} claims match</span>
              <div class="sp"></div>
              <button class="btn s" onclick="clearFilters()">Clear filters</button>
            </div>`
         : '';
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:4px">
-          <div><h1>${admin ? 'Claims' : 'My Claims'}</h1><span class="mu">${num(total)} worked example${total === 1 ? '' : 's'} in your scope · ${num(OWNER_QUEUE.length)} claims still need work across the whole export</span></div>
+          <div><h1>${admin ? 'Claims' : 'My Claims'}</h1><span class="mu">${num(total)} claim${total === 1 ? '' : 's'} in your scope${yearNote} · ${num(OWNER_QUEUE.length)} claims still need work across the whole export</span></div>
           <div class="sp"></div>
           <button class="btn" onclick="toast('Exported claims.csv')">⇩ Export</button>
         </div>
         <div class="row" style="margin-bottom:14px">
           <span class="b ${admin ? 'Low' : 'Med'}">${admin ? 'Admin · all claims' : 'Manager · your caseload only'}</span>
           <span class="mu" style="font-size:12px">${admin
-            ? `This table shows the ${num(total)} claims with real narrative content, drawn from ${num(DATA_QUALITY.total)} total. Every claim is listed on the dashboards.`
-            : `Only claims owned by ${esc(getSession().name)} are listed.`}</span>
+            ? `The ${num(total)} claims raised${yearNote}, out of ${num(DATA_QUALITY.total)} in the export. Every claim is listed on the dashboards.`
+            : `Only claims owned by ${esc(getSession().name)} are listed, cut to ${filter.yr ? esc(filter.yr) : 'every year'}.`}</span>
         </div>
         <div class="card">
           ${banner}
           <div class="row" style="margin-bottom:14px">
+            ${yearSelect()}
             <input id="q" placeholder="Search claim, order, type…" value="${esc(filter.q)}"
-                   oninput="filter.q=this.value;renderResults()" style="min-width:240px">
+                   oninput="setFilter('q',this.value)" style="min-width:240px">
             ${filterSelect('st', ['Open', 'Resolved', 'Cancelled', 'Denied'], 'Status')}
             ${filterSelect('de', [...new Set(inScope().map((c) => c.de))].sort(), 'Department')}
             ${filterSelect('ty', [...new Set(inScope().map((c) => c.ty))].sort(), 'Claim type')}
             ${filterSelect('pr', ['High', 'Medium', 'Low'], 'Priority')}
             ${admin ? `
-              <select onchange="filter.own=this.value;renderResults()">
+              <select onchange="setFilter('own',this.value)" aria-label="All owners">
                 <option value="">All owners</option>
                 ${OWNERS.map((o) => `<option value="${o.id}"${filter.own === o.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
               </select>` : ''}
@@ -208,6 +349,7 @@
             <tr><th>Claim ID</th><th>Raised by</th><th>Order ID</th><th>Claim Type</th><th>Department</th>${admin ? '<th>Owner</th>' : ''}<th>Status</th><th>Credit</th><th>AI Root Cause / Resolution</th><th>Priority</th><th></th></tr>
             <tbody id="results"></tbody>
           </table></div>
+          <div id="pager"></div>
         </div>`;
       renderResults();
     }
@@ -216,6 +358,16 @@
       if (!requireAuth()) return;
       document.body.innerHTML = layout('claims');
       readParams();
+      // The page opens on the current year. The export holds 31,517 claims, and
+      // cutting the population before it is filtered and paged is what makes this
+      // page open at all rather than render every row into the table.
+      //
+      // A scenario link is the exception. The dashboard card that sent the reader
+      // here counted the whole export, so quietly narrowing to the current year
+      // behind their back would leave the card and this table disagreeing about
+      // the same number. Those links stay on the whole export unless the link
+      // names a year of its own.
+      if (!filter.yr && !carried) filter.yr = defaultYear();
       render();
     }
   </script>
