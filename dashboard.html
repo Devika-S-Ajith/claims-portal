@@ -819,7 +819,6 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     // Whole-year totals (total raised, resolved) are deliberately absent: they
     // have no filter to open and nothing to pick up, so they live in the KPI
     // tiles once rather than sitting in a priority queue.
-    // Source columns and definitions for every card are in DASHBOARD.md.
     const PRIO = { 1: ['Do First', 'p1'], 2: ['Do Next', 'p2'], 3: ['Review', 'p3'] };
     const SRC = { ai: ['AI Insight', 'sai'], metric: ['Metric', 'smetric'] };
 
@@ -1296,7 +1295,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
             </div>`).join('')}
         </div>
 
-        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', `<a class="btn s" href="DASHBOARD.md" target="_blank">Field guide</a>`)}
+        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', '')}
         ${renderFindings()}
 
         <div class="split"></div>

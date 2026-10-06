@@ -2,63 +2,92 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Claims Portal – Choose sign-in</title>
+  <title>Claims Portal – Sign in</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script>
-    // Step 1 of 2. This page only asks which door you are walking through.
-    // No names, no email addresses, no credentials. Those belong on the next
-    // page, which is reached only after a role is chosen.
+    // Admin-only sign-in page, reached directly. Demo credentials are
+    // pre-filled so a tester can sign straight in.
+    // The email is validated against the accounts that hold the Admin role.
 
-    function continueAs(r) {
-      location.href = 'login-credentials.html?role=' + encodeURIComponent(r);
+    const DEMO_PASSWORD = 'password';
+
+    const role = 'Admin';
+
+    let accounts = [];
+
+    function fail(html) {
+      const msg = document.getElementById('msg');
+      if (msg) msg.innerHTML = html;
+    }
+
+    function signIn() {
+      const em = document.getElementById('em');
+      const pw = document.getElementById('pw');
+      const email = (em ? em.value : '').trim().toLowerCase();
+      const password = pw ? pw.value : '';
+      const user = accounts.find((o) => o.email.toLowerCase() === email);
+
+      if (!email || !password) {
+        fail('<div class="err">Enter your email address and password.</div>');
+        return;
+      }
+      if (!user) {
+        fail(`<div class="err">No ${esc(role.toLowerCase())} account uses that email address.</div>`);
+        return;
+      }
+      if (password !== DEMO_PASSWORD) {
+        fail('<div class="err">That password is not correct.</div>');
+        return;
+      }
+      if (user.status === 'Inactive') {
+        fail(`<div class="err">${esc(user.name)}'s account is ${user.status.toLowerCase()}. Ask an admin to reactivate it.</div>`);
+        return;
+      }
+
+      fail('');
+      setSession(user);
+      location.href = 'dashboard.html';
     }
 
     function render() {
       const app = document.getElementById('app');
       if (!app) return;
-      const s = getSession();
+
+      const defaultAcct = accounts.find((o) => o.status !== 'Inactive') || accounts[0];
 
       app.innerHTML = `
         <div class="login-head">
           <div class="logo" style="margin-bottom:4px"><i></i>Claims Portal</div>
-          <p class="mu" style="margin:0">Sign in to Claims Management &amp; Intelligence</p>
+          <p class="mu" style="margin:0">Signing in as <b>${esc(role)}</b></p>
         </div>
 
-        ${s ? `<div class="card resume">
-            <b>Signed in as ${esc(s.name)} · ${s.role}</b>
-            <p class="mu" style="font-size:12px;margin:6px 0 12px">You are already signed in on this device.</p>
-            <div class="row" style="gap:8px">
-              <a class="btn p s" href="dashboard.html">Go to dashboard</a>
-              <button class="btn ghost s" onclick="signOut()">Sign out</button>
-            </div>
-          </div>` : ''}
-
-        <p class="mu pickhint">Choose how you are signing in</p>
-
-        <div class="rolegrid">
-          <button type="button" class="card rolecard adm" onclick="continueAs('Admin')">
+        <div class="card credcard adm">
+          <div class="row" style="align-items:center;margin-bottom:4px">
             <span class="ricon">&#9819;</span>
-            <b class="rtitle">Admin</b>
-            <p class="mu rblurb">Every claim, plus the Admin Dashboard showing who owns which case, workload per manager, and system settings.</p>
-            <span class="go">Continue &rarr;</span>
-          </button>
+            <b class="rtitle">Admin sign in</b>
+          </div>
+          <p class="mu" style="font-size:13px;margin:0 0 4px">Sign in to see every claim and the Admin Dashboard.</p>
 
-          <button type="button" class="card rolecard mgr" onclick="continueAs('Manager')">
-            <span class="ricon">&#128100;</span>
-            <b class="rtitle">Manager</b>
-            <p class="mu rblurb">Only the claims routed to you, with the same dashboard and charts scoped to your own caseload.</p>
-            <span class="go">Continue &rarr;</span>
-          </button>
-        </div>
+          <div class="rform" style="border-top:0;padding-top:12px;margin-top:12px">
+            <label for="em">Email</label>
+            <input id="em" type="email" autocomplete="username" placeholder="name@co.com" value="${defaultAcct ? esc(defaultAcct.email) : ''}">
+            <label for="pw">Password</label>
+            <input id="pw" type="password" autocomplete="current-password" value="${DEMO_PASSWORD}">
+            <button class="btn p" style="width:100%;margin-top:14px" onclick="signIn()">Sign in</button>
+          </div>
 
-        <p class="mu foot">Demo build. There is no server, so access control is enforced in the page rather than on a backend.</p>`;
+          <div id="msg" style="margin-top:12px"></div>
+        </div>`;
     }
 
-    document.addEventListener('DOMContentLoaded', render);
+    document.addEventListener('DOMContentLoaded', () => {
+      accounts = OWNERS.filter((o) => o.role === role);
+      render();
+    });
   </script>
 </head>
 <body>

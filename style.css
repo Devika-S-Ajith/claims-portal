@@ -209,37 +209,12 @@ svg.trend circle.pt:hover{opacity:1;r:5;filter:drop-shadow(0 0 3px rgba(99,102,2
 .login .logo{margin-bottom:4px;font-size:20px}
 .login-head{text-align:center}
 .login-head p{margin:0}
-.login .rolegrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-.login .pickhint{text-align:center;font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin:-4px 0 0;font-weight:600}
 .login .credcard{max-width:460px;margin:0 auto;width:100%}
-.login .backlink{display:inline-block;margin-top:14px;font-size:12px;color:var(--mu);text-decoration:none}
-.login .backlink:hover{color:var(--pr)}
-.login .demo{padding:14px 18px;max-width:460px;margin:0 auto;width:100%}
-.login .demo summary{cursor:pointer;font-size:12px;list-style:revert}
-.login .demo .people{margin-top:12px}
 .login .loginwrap:has(.credcard){max-width:520px}
 .login .card{width:100%;max-width:100%;padding:22px;border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 24px 60px -24px rgba(16,24,40,.22)}
 .login input{width:100%;margin:6px 0 14px}
-.login .rolecard{cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .2s}
-.login .rolecard:hover{transform:translateY(-2px)}
-.login .rolecard.on{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.14),0 18px 40px -24px rgba(16,24,40,.3)}
-.login .rolecard.on.adm{border-color:var(--pr);box-shadow:0 0 0 3px rgba(99,102,241,.14),0 18px 40px -24px rgba(16,24,40,.3)}
-.login .rolecard.on.mgr{border-color:var(--bl);box-shadow:0 0 0 3px rgba(59,130,196,.16),0 18px 40px -24px rgba(16,24,40,.3)}
 .ricon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:17px;flex:none;background:var(--pl);color:var(--pr-d)}
-.rolecard.mgr .ricon{background:#e7eefb;color:#2b6ca8}
 .rtitle{display:block;font-size:15px;margin-top:1px}
-.rblurb{font-size:12px;margin:4px 0 0;line-height:1.5}
-.rsel{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--bd);display:grid;place-items:center;font-size:12px;color:var(--pr);flex:none}
-.rolecard.on .rsel{border-color:currentColor;background:var(--pl)}
-.rolecard.mgr.on .rsel{background:#e7eefb}
-.people{display:grid;gap:6px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--bd)}
-.person{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;border-radius:11px;border:1px solid var(--bd);background:transparent;cursor:pointer;font:inherit;color:inherit;transition:.15s}
-.person:hover{border-color:var(--pr);background:color-mix(in srgb,var(--pl) 40%,transparent)}
-.person.on{border-color:var(--pr);background:var(--pl);box-shadow:0 0 0 2px rgba(99,102,241,.12)}
-.person.off{opacity:.6}
-.person .pinfo{display:flex;flex-direction:column;flex:1;min-width:0}
-.person .pinfo b{font-size:13px;font-weight:600}
-.person .pinfo span{font-size:11px;overflow:hidden;text-overflow:ellipsis}
 .rform{margin-top:14px;padding-top:14px;border-top:1px dashed var(--bd)}
 .rform label{display:block;font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.05em;margin-top:10px}
 .rform label:first-child{margin-top:0}
@@ -274,7 +249,6 @@ tr.tot td{border-top:2px solid var(--bd);background:color-mix(in srgb,var(--pl) 
 .mb b{flex:none}
 code{font:inherit;font-size:.95em;background:color-mix(in srgb,var(--bd) 70%,transparent);padding:1px 5px;border-radius:5px}
 tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
-@media(max-width:820px){.login .rolegrid{grid-template-columns:1fr}}
 .err{color:var(--er);font-size:12px;margin-bottom:10px;background:#fdebe9;border:1px solid #f5c9c5;padding:8px 12px;border-radius:10px}.mu{color:var(--mu)}
 
 /* ---- dashboard: borderless stat line ---- */
@@ -297,10 +271,9 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .stat:first-child{padding-top:0;border-top:0}
 .stat:last-child{padding-bottom:0}}
 
-/* ---- shared finding-card content, also used by departments.html ---- */
-/* departments.html renders this same card shape (its own four insights), so
-   these rules stay generic. The chrome around them is per-page: .act-card there,
-   .ncard on the dashboard feed. */
+/* ---- shared finding-card content ---- */
+/* .act-card holds the case-level cards (claims/dashboard feed), .ncard the
+   dashboard feed cards. */
 .ac-n{display:block;font-size:28px;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
 .ac-label{display:block;font-size:13px;font-weight:600;margin-top:3px;line-height:1.35}
 .spark{display:block;width:100%;height:30px;margin-top:10px;overflow:visible}
@@ -310,7 +283,7 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .ac-money{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 .ac-money em{display:block;font-style:normal;font-size:11px;font-weight:500;color:var(--mu);margin-top:2px}
 
-/* ---- departments.html finding cards ---- */
+/* ---- .act-card finding cards ---- */
 .act-card{display:block;text-decoration:none;color:inherit;cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s;border-left:4px solid var(--bd)}
 .act-card:hover{transform:translateY(-2px);box-shadow:0 1px 2px rgba(16,24,40,.04),0 18px 34px -20px rgba(16,24,40,.28)}
 .act-card.p1{border-left-color:var(--er)}
