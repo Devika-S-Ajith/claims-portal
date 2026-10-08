@@ -156,8 +156,16 @@ const g = (r, k) => (r[C[k]] === undefined ? '' : String(r[C[k]]).trim());
 const num = (r, k) => { const f = parseFloat(g(r, k)); return isNaN(f) ? 0 : f; };
 const one = (r, k) => g(r, k) === '1';
 
-const claims = rows.slice(1)
-  .filter((r) => r.length === header.length && String(r[C['Claim#']]).trim() !== '')
+// The export splits long notes across extra lines, and those fragments land in
+// the file with prose where the claim number should be - "total credit $55.04",
+// a sentence of an email. They carry no id, no credit and no type, so they are
+// counted and dropped here rather than loaded as claims.
+const CLAIM_ID = /^[0-9]+$/;
+const dataRows = rows.slice(1).filter((r) => r.length === header.length && g(r, 'Claim#') !== '');
+const noClaimId = dataRows.filter((r) => !CLAIM_ID.test(g(r, 'Claim#'))).length;
+
+const claims = dataRows
+  .filter((r) => CLAIM_ID.test(g(r, 'Claim#')))
   .map((r, i) => {
     const date = g(r, 'ClaimDate');
     const y = Number(date.slice(0, 4)) || 0;
@@ -205,7 +213,17 @@ const claims = rows.slice(1)
     };
   });
 
-console.log('rows parsed:', claims.length);
+// classify-types.js has taken the blanks as far as text can: rules over the
+// description first, then the ClaimDept itself, then the type that department's
+// own typed claims use most often. What is still '(Unclassified)' is a real
+// claim - it carries credit, a date and a status - so it stays in every total,
+// percentage and headline, and the portal still adds up to the export. It is
+// kept out of the lists, queues, charts and type filters (LISTED below),
+// because a bucket called "no claim type" answers no question a reader has.
+// DATA_QUALITY reports the size of the gap to the admin pages.
+const LISTED = (c) => c.type !== '(Unclassified)';
+
+console.log('rows parsed:', claims.length, '| untyped, totals only:', claims.length - claims.filter(LISTED).length);
 
 // order -> claims, for the repeat-order metric
 const byOrder = new Map();
@@ -227,7 +245,7 @@ const FLAGS = (c) => {
   if (c.cancelled) f.push('Cancelled');
   if (!c.entryFinished) f.push('Entry not finished');
   if (c.order && repeatOrders.has(c.order)) f.push('Repeat-claim order');
-  if (c.rawDept === '') f.push('Unassigned Department');
+  if (c.rawDept === '(Unassigned)') f.push('Unassigned Department');
   return f;
 };
 
@@ -321,8 +339,11 @@ function block(list, label) {
   // Monthly spread of the biggest claim types. A fault that appears in most
   // months keeps coming back; one that appears in a single month is an incident.
   // Without this the UI can only rank by volume, which cannot tell the two apart.
+  // The untyped claims are left out: they are not a type, and listing them as
+  // the biggest one would put a gap in the export at the top of every chart.
   const byTypeMonth = new Map();
   for (const c of list) {
+    if (!LISTED(c)) continue;
     if (!byTypeMonth.has(c.type)) byTypeMonth.set(c.type, new Array(12).fill(0));
     byTypeMonth.get(c.type)[c.m - 1]++;
   }
@@ -349,7 +370,7 @@ function block(list, label) {
     rcaFilled: list.filter((c) => c.rca).length,
     capaFilled: list.filter((c) => c.capa).length,
     paFilled: list.filter((c) => c.pa).length,
-    unassigned: list.filter((c) => c.rawDept === '').length,
+    unassigned: list.filter((c) => c.rawDept === '(Unassigned)').length,
     repeatOrders: repOrders.size,
     repeatClaims: rep.length,
     repeatCredit: r2(rep.reduce((s, c) => s + c.credit, 0)),
@@ -369,7 +390,7 @@ function block(list, label) {
     area: by((c) => areaOf(c.dept)),
     whs: by((c) => c.wh),
     dist,
-    types: by((c) => c.type),
+    types: by((c) => c.type).filter((t) => t[0] !== '(Unclassified)'),
     typeMonths,
     dept: by((c) => c.dept),
     months
@@ -723,7 +744,10 @@ console.log('departments indexed:', DEPT_INDEX.length,
   '| routing:', DEPT_INDEX.map((d) => d[0] + '=' + (d[3] || '-')).join(' '));
 
 // ---------------------------------------------------------------- queue
-const QUEUE_SRC = claims.filter(needsAction)
+// Only listed claims reach the queue: the untyped ones are still counted in the
+// page's totals and reported as a gap on the admin pages, but an owner cannot
+// act on a claim whose type nobody has written down from this view.
+const QUEUE_SRC = claims.filter((c) => LISTED(c) && needsAction(c))
   .map((c) => [c.id, c.order, c.type, c.dept, c.status, c.credit, FLAGS(c).join('~'),
     c.date, ownerOf(c.dept), c.issuer, c.desc.slice(0, 300), c.rca, c.capa, c.note.slice(0, 300),
     c.memoNo, c.memoDate, c.memoAmt, c.rdate, c.forInv, c.carrier || '']);
@@ -733,9 +757,10 @@ console.log('queue rows:', QUEUE_SRC.length);
 // ---------------------------------------------------------------- examples
 // Real claims that actually have narrative content, spread across the four
 // owners and a mix of statuses, so the detail page shows real information.
-// Build full set of real claims for listing
+// This is the portal's claim list: untyped claims are counted in the stats but
+// never listed here, so the table and its type filter only show real types.
 const EXAMPLE_CANDIDATES = claims
-  .filter((c) => c.id && c.id.trim())
+  .filter(LISTED)
   .map((c) => ({
 
   id: c.id,
@@ -800,9 +825,12 @@ const orderCarrier = (set) => {
   return [...set].sort().join('/');
 };
 
+// The orders table links each order to its claims, so it is built from listed
+// claims only: counting an untyped claim here would show an order claiming more
+// work than the link behind it can open.
 const orderAgg = new Map();
 for (const c of claims) {
-  if (!c.order) continue;
+  if (!c.order || !LISTED(c)) continue;
   if (!orderAgg.has(c.order)) orderAgg.set(c.order, { id: c.order, claims: 0, credit: 0, depts: new Set(), owners: new Set(), types: new Set(), carriers: new Set(), open: 0, first: c.date, last: c.date, otype: c.otype });
   const e = orderAgg.get(c.order);
   e.claims++; e.credit = r2(e.credit + c.credit);
@@ -827,24 +855,34 @@ console.log('order aggregates embedded:', ORDER_IDS.length, 'of', orderAgg.size,
 
 // ---------------------------------------------------------------- data quality
 const DQ = (() => {
-  const blankDept = claims.filter((c) => c.rawDept === '').length;
-  const blankType = claims.filter((c) => c.type === '(Unclassified)').length;
-  const junk = DEPT_OWNERS.filter((d) => d.dept === 'Claim Dept').reduce((s, d) => s + d.n, 0);
+  const blankDept = claims.filter((c) => c.rawDept === '(Unassigned)').length;
+  // The untyped claims are counted here rather than dropped, so the admin pages
+  // can say how much of the export carries no type - and how thin the rest is.
+  const untyped = claims.filter((c) => c.type === '(Unclassified)');
+  const blankType = untyped.length;
+  const junk = claims.filter((c) => c.rawDept === 'Claim Dept').length;
   const nearDupes = ['Sample Dept|Sample Dep.', 'System|System Error', 'Drinkware|Drinkware Damage|Drinkware Lids|Drinkware Digital', 'Courier|UPS|FEDEX'];
   const nearDupeClaims = nearDupes.reduce((s, grp) => {
     const set = new Set(grp.split('|'));
-    return s + claims.filter((c) => set.has(c.dept)).length;
+    return s + claims.filter((c) => set.has(c.rawDept)).length;
   }, 0);
   return {
     total: claims.length,
-    blankDept, blankType, junk, nearDupes, nearDupeClaims,
+    blankDept, blankType,
+    // Untyped claims are counted in `total` but never listed; these two say how
+    // much of the export that hides, and noClaimId is what was dropped outright.
+    blankTypeNoDesc: untyped.filter((c) => !c.desc).length,
+    blankTypeCredit: r2(untyped.reduce((s, c) => s + c.credit, 0)),
+    noClaimId,
+    junk, nearDupes, nearDupeClaims,
     blankCurrency: claims.length,
     blankClaimAction: claims.length,
     statusCodes: [...claims.reduce((m, c) => { if (c.statusCode) m.set(c.statusCode, (m.get(c.statusCode) || 0) + 1); return m; }, new Map())]
       .map(([k, v]) => k + '=' + v),
     statusCodeDistinct: new Set(claims.map((c) => c.statusCode).filter(Boolean)).size,
     resolvedNoDate: claims.filter((c) => c.resolved && !c.rdate).length,
-    distinctTypes: ALL.types.length,
+    // Real types only: '(Unclassified)' is the absence of a type, not one of them.
+    distinctTypes: ALL.types.filter((t) => t[0] !== '(Unclassified)').length,
     distinctDepts: ALL.dept.length,
     distinctRaisers: ALL.raisers,
     yearSpan: YEARS[YEARS.length - 1] + '-' + YEARS[0]

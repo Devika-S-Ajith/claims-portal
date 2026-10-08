@@ -326,7 +326,7 @@
         <div class="row" style="margin-bottom:14px">
           <span class="b ${admin ? 'Low' : 'Med'}">${admin ? 'Admin · all claims' : 'Manager · your caseload only'}</span>
           <span class="mu" style="font-size:12px">${admin
-            ? `The ${num(total)} claims raised${yearNote}, out of ${num(DATA_QUALITY.total)} in the export. Every claim is listed on the dashboards.`
+            ? `The ${num(total)} claims raised${yearNote}, out of ${num(DATA_QUALITY.total)} in the export. ${num(DATA_QUALITY.blankType)} unclassified claims stay in the totals but are not listed here.`
             : `Only claims owned by ${esc(getSession().name)} are listed, cut to ${filter.yr ? esc(filter.yr) : 'every year'}.`}</span>
         </div>
         <div class="card">

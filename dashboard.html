@@ -849,9 +849,9 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       };
 
       // 1. Recurring issue - the type that turns up in every single month, so it
-      // is a standing fault rather than a one-off. (Unclassified) is left out
-      // because the blind-spot card below reports it, and counting it in both
-      // places would print the same number twice.
+      // is a standing fault rather than a one-off. `real` is simply every type
+      // in the series: the untyped claims never reach S.typeMonths, so there is
+      // no "no claim type" bucket competing with real faults here.
       const chronic = real.filter((s) => s.inMonths === n && n >= 3 && s.total > 0);
       const topChronic = claim(chronic.map((s) => s.t));
 
@@ -915,9 +915,10 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       // a claim that a cause is already known.
       const byOpen = {};
       queue().forEach((r) => { byOpen[r.ty || '(Unclassified)'] = (byOpen[r.ty || '(Unclassified)'] || 0) + 1; });
-      // Deliberately not routed through claim(): (Unclassified) is usually the
-      // biggest open pile, and "the claims nobody has classified" is precisely
-      // where a corrective action is most overdue.
+      // Deliberately not routed through claim(): the queue only holds listed
+      // claims, so the biggest open pile is a real type, and counting it twice
+      // through claim()'s de-duplication would hand the card to whatever has
+      // not been described yet rather than to whatever is heaviest.
       const topOpen = Object.keys(byOpen).sort((a, b) => byOpen[b] - byOpen[a])[0];
       if (topOpen) {
         out.push({

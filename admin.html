@@ -17,7 +17,7 @@
         ['Claim Statuses', (CLAIM_STATS_ALL.status || []).map((s) => `${s[0]} (${num(s[1])})`).join(', ')],
         ['Claim Types in use', `${num(DATA_QUALITY.distinctTypes)} distinct · top: ${topTypes.join(', ')}`],
         ['Owning departments', `${num(DATA_QUALITY.distinctDepts)} distinct · top: ${topDepts.join(', ')}`],
-        ['Unclassified claims', `${num(DATA_QUALITY.blankType)} with no ClaimType, ${num(DATA_QUALITY.blankDept)} with no ClaimDept`]
+        ['Unclassified claims', `${num(DATA_QUALITY.blankType)} with no ClaimType (${num(DATA_QUALITY.blankTypeNoDesc)} with no description, ${usd(DATA_QUALITY.blankTypeCredit)} credit) - counted in the totals, never listed; ${num(DATA_QUALITY.blankDept)} with no ClaimDept; ${num(DATA_QUALITY.noClaimId)} export rows had no claim id and are not loaded`]
       ];
 
       document.getElementById('app').innerHTML = `

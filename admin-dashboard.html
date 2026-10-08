@@ -183,8 +183,10 @@
       const heaviest = managers().slice().sort((a, b) => b.queue - a.queue)[0];
       const cleanest = managers().slice().sort((a, b) => a.queue / a.total - b.queue / b.total)[0];
       const unassigned = S.unassigned;
-      const untyped = S.types.find((t) => t[0] === '(Unclassified)');
-      const untypedN = untyped ? untyped[1] : 0;
+      // The untyped claims never reach a list or a chart, so S.types no longer
+      // carries the bucket - the data-quality card reads it off DATA_QUALITY,
+      // which counts the whole export instead of the listed rows.
+      const untypedN = DATA_QUALITY.blankType;
       const rows = queueRows();
 
       document.getElementById('app').innerHTML = `
@@ -284,14 +286,15 @@
         </div>
         <div class="grid g4">
           <div class="card icard"><span class="tag">Root cause</span><b class="ttl">${pct(S.noRca, S.total)} blank</b><p class="mu">RootCauseAnalysis is filled on only ${num(S.rcaFilled)} of ${num(S.total)} claims (${pct(S.rcaFilled, S.total)}). Cause analysis is not possible until it is captured.</p></div>
-          <div class="card icard"><span class="tag">Claim type</span><b class="ttl">${num(untypedN)} unclassified</b><p class="mu">${pct(untypedN, S.total)} of claims have no claim type, so the real mix is hidden. ${num(DATA_QUALITY.distinctTypes)} distinct types are in use.</p></div>
+          <div class="card icard"><span class="tag">Claim type</span><b class="ttl">${num(untypedN)} unclassified</b><p class="mu">${pct(untypedN, S.total)} of claims carry no claim type: they stay in every total, but they are never listed or charted. ${num(DATA_QUALITY.distinctTypes)} distinct types are in use.</p></div>
           <div class="card icard"><span class="tag">Ownership</span><b class="ttl">${num(unassigned)} unassigned</b><p class="mu">${pct(unassigned, S.total)} of claims have no owning department and sit with the admin account. Routing is a model, not a fact.</p></div>
           <div class="card icard"><span class="tag">Status field</span><b class="ttl">Effectively unused</b><p class="mu">ClaimStatus is a sparse code (${esc(DATA_QUALITY.statusCodes.join(', '))}) and ${num(DATA_QUALITY.resolvedNoDate)} resolved claims carry no resolved date, so status is derived from the Resolved/Denied/Cancelled flags instead.</p></div>
         </div>
         <div class="card" style="margin-top:12px">
           <div class="row"><h3>Where the export is thin</h3><div class="sp"></div><span class="b Med">limits analysis</span></div>
           <p class="mu" style="font-size:12px;line-height:1.7">
-            <b style="color:var(--tx)">${num(DATA_QUALITY.blankType)}</b> claims have no claim type ·
+            <b style="color:var(--tx)">${num(DATA_QUALITY.blankType)}</b> claims have no claim type (${num(DATA_QUALITY.blankTypeNoDesc)} of them with no description, ${usd(DATA_QUALITY.blankTypeCredit)} of credit) - counted in the totals, never listed ·
+            <b style="color:var(--tx)">${num(DATA_QUALITY.noClaimId)}</b> export rows carried no claim id and are not loaded ·
             <b style="color:var(--tx)">${num(DATA_QUALITY.blankDept)}</b> have no owning department ·
             <b style="color:var(--tx)">${num(DATA_QUALITY.junk)}</b> carry the placeholder department "Claim Dept" ·
             <b style="color:var(--tx)">${num(DATA_QUALITY.nearDupeClaims)}</b> sit in near-duplicate department names (${DATA_QUALITY.nearDupes.map((g) => esc(g.replace(/\|/g, ' / '))).join(' · ')}) ·
