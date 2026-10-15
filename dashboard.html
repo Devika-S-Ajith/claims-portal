@@ -42,6 +42,10 @@
     const TYPES_TOP = 10;
 
     let year = LATEST_YEAR;
+    // Wording that names the reporting year. "This year" and "last year" only
+    // describe the newest year: once an older one is selected they would point
+    // the reader at the wrong two years, so a past year is named outright.
+    const liveYear = () => year === LATEST_YEAR;
     let typesExpanded = false;
     // Department comparison used to be three charts, then one table behind a
     // measure picker; it is one table with a column per measure now, so there is
@@ -180,7 +184,7 @@
     // actually looking for. The card itself is a flex column (.dcard) so the
     // breakdown can absorb whatever height the neighbouring cards set.
     function donut(key, data) {
-if (!data.length) return '<p class="mu">No claims in this year.</p>';
+if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' : `in ${year}`}.</p>`;
       const byValue = metric[key] === 'value';
       const i = byValue ? 2 : 1;
       // Status is coloured by meaning (see STATUS_COLOR); team area falls back
@@ -269,7 +273,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     // including one with no claims, so a site cannot quietly vanish.
     function pie(rows) {
       const total = rows.reduce((a, d) => a + d[1], 0);
-      if (!total) return '<p class="mu">No claims in this year.</p>';
+      if (!total) return `<p class="mu">No claims ${liveYear() ? 'in this year' : `in ${year}`}.</p>`;
       const color = (n) => COLORS[n % COLORS.length];
 
       // Same gap treatment as the status ring: taken out of each arc's length
@@ -622,7 +626,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       }).join('');
 
       return (
-        `<svg class="trend" viewBox="0 0 ${TL.w} ${TL.h}" width="100%" role="img" aria-label="Monthly trend, this year against last year">` +
+        `<svg class="trend" viewBox="0 0 ${TL.w} ${TL.h}" width="100%" role="img" aria-label="Monthly trend, ${liveYear() ? 'this year against last year' : `${year} against ${year - 1}`}">` +
         `${band}${grid.join('')}` +
         `<polyline class="pv" points="${pts('p', cells)}"/>` +
         `<polyline class="cu" points="${pts('c', cells.slice(0, cut))}"/>` +
@@ -813,9 +817,10 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     //   link - optional { label, q } for the claims table, or { label, page } to
     //          point somewhere else. Absent where the claims table cannot express
     //          the scenario, because a link that opens everything is a lie.
-    //   noTable - why there is no link, for the pop-up's footer to state. Better a
-    //          sentence the reader can check than a control that leads somewhere
-    //          the label does not describe.
+    // Every card in the feed carries a link today, so the pop-up footer always
+    // shows one; popFoot still falls back to a plain sentence if a future card has
+    // no scenario the table can express, rather than a control the label does not
+    // describe.
     // Whole-year totals (total raised, resolved) are deliberately absent: they
     // have no filter to open and nothing to pick up, so they live in the KPI
     // tiles once rather than sitting in a priority queue.
@@ -948,11 +953,11 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         v: `${pct(S.unfinished, S.total)} of intake · entry not marked finished`,
         go: 'Review entries',
         why: `Claims raised in ${year} whose ClaimEntryFinished field is not 1 - somebody opened the entry and did not close it out. It counts the whole year rather than only what is still open, so a claim closed since still shows up here.`,
-        // Deliberately no table link. The flag this card counts has no column on
-        // claims.html, and the nearest thing there - status Open - is a different
-        // population, because a resolved claim can still carry an unfinished entry.
-        // A link to the wrong population is worse than no link.
-        noTable: 'The claims table has no column for entry-not-finished, and status Open is a different set, so there is nothing there to link to.'
+        // claims.html has an "Entry" filter ('fin') for exactly this field, so the
+        // card links to its own population. Passing no year keeps it consistent
+        // with the other card links, which open the whole export and let the
+        // arrival banner reconcile the card count against the table's.
+        link: { label: 'View in table', q: { fin: 'no' } }
       });
 
       add({
@@ -960,7 +965,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         label: 'Repeat-claim orders',
         v: `${num(S.repeatOrders)} orders hit twice · ${usd(S.repeatCredit)} credit`,
         go: 'Review orders',
-        why: `Claims raised in ${year} against an OrderID that raised more than one claim anywhere in the whole 2010-2026 file, not just this year - so an order claimed against in two different years still counts. A repeat claim is usually one problem entered twice.`,
+        why: `Claims raised in ${year} against an OrderID that raised more than one claim anywhere in the whole 2010-2026 file, not just ${year} - so an order claimed against in two different years still counts. A repeat claim is usually one problem entered twice.`,
         link: { label: 'View orders', page: 'orders.html' }
       });
 
@@ -1007,7 +1012,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
     // priority tiers, which every card already labels for itself.
     function renderFindings() {
       const all = buildActions();
-      if (!all.length) return '<p class="mu">Nothing outstanding this year.</p>';
+      if (!all.length) return `<p class="mu">Nothing outstanding ${liveYear() ? 'this year' : `in ${year}`}.</p>`;
       // Nothing sits above the grid any more. That row carried the priority-tier
       // legend first, then the card count once the legend was removed - a key to
       // three tiers that every card already labels for itself, followed by a
@@ -1142,7 +1147,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
           ${popFacts(facts)}
           ${groups || '<p class="mu" style="font-size:12px">Nothing on this is open any more, so there is nothing to break down.</p>'}
         </div>
-        ${popFoot(link, a.noTable)}`;
+        ${popFoot(link)}`;
     }
 
     function openCard(i) {
@@ -1186,7 +1191,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         : [];
 
       const why = isDept
-        ? `Every claim raised in ${year} from this department, off the same row the comparison table above is built from. Still open is this year's open-claim queue narrowed to it, so it counts denied and cancelled entries as well as unresolved ones.`
+        ? `Every claim raised in ${year} from this department, off the same row the comparison table above is built from. Still open is the year's open-claim queue narrowed to it, so it counts denied and cancelled entries as well as unresolved ones.`
         : `The export has no Carrier column, so this is counted out of the department, claim type and description. The six reason columns in the scorecard partition these claims - each one lands on exactly one reason or on "not a carrier fault" - which is why they add up to the claim count rather than exceeding it.`;
 
       return openModal(`
@@ -1232,13 +1237,13 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
       // inventing a comparison that would be quietly wrong.
       const compare = (d) => !d
         ? 'No comparable prior period'
-        : `${d.dir === 'up' ? '↑' : d.dir === 'down' ? '↓' : '–'} ${d.mag} from last year`;
+        : `${d.dir === 'up' ? '↑' : d.dir === 'down' ? '↓' : '–'} ${d.mag} from ${liveYear() ? 'last year' : year - 1}`;
       // named statLine, not stats - `stats(y)` is the year resolver above, and
       // reusing the name here would put it in the TDZ for all of render()
       const statLine = [
         ['Claims raised', num(S.total), compare(dClaims)],
         ['Credit given', usd(S.credit), compare(dCredit)],
-        ['Still open', num(S.unresolved), `${pct(S.unresolved, S.total)} of claims raised this year`]
+        ['Still open', num(S.unresolved), `${pct(S.unresolved, S.total)} of claims raised ${liveYear() ? 'this year' : `in ${year}`}`]
       ];
 
       const memoGap = df.reduce((a, d) => a + (d[6] - d[8]), 0);
@@ -1275,13 +1280,14 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
         <div class="row" style="margin-bottom:6px">
           <div><h1>Claims Dashboard</h1><span class="mu">${esc(S.range)}</span></div>
           <div class="sp"></div>
+          ${isAdmin() ? '<a class="btn" href="admin-dashboard.html">Admin Dashboard</a>' : ''}
           <div class="dropdown">
             <button class="dd-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"
               onclick="return yearMenu(this)">${year}<span class="dd-caret">▾</span></button>
             <div class="dd-menu year-menu" role="listbox" aria-label="Reporting year">
               ${YEARS.map((y) => `
                 <button type="button" role="option" aria-selected="${year === y}" class="${year === y ? 'on' : ''}"
-                  onclick="setYear(${y})">${y}${y === year ? '<span class="mu">current</span>' : ''}</button>`).join('')}
+                  onclick="setYear(${y})">${y}${y === LATEST_YEAR ? '<span class="mu">current</span>' : ''}</button>`).join('')}
             </div>
           </div>
           <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
@@ -1301,7 +1307,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
 
         <div class="split"></div>
 
-        ${sect('This Year vs Last Year', n < MONTHS.length
+        ${sect(liveYear() ? 'This Year vs Last Year' : `${year} vs ${year - 1}`, n < MONTHS.length
           ? `${MONTHS[0]}–${MONTHS[n - 1]} of ${year} against the full year ${year - 1}`
           : `${MONTHS[0]}–${MONTHS[n - 1]} of both years`)}
         <div class="grid g2">
@@ -1352,7 +1358,7 @@ if (!data.length) return '<p class="mu">No claims in this year.</p>';
             <span class="mu" style="font-size:12px">${cf.length
               ? cf.reduce((a, c) => a + c[1], 0) + ' of ' + num(S.total) + ' claims name a carrier (' +
                 pct(cf.reduce((a, c) => a + c[1], 0), S.total) + ' of claims raised)'
-              : 'No claims name a carrier this year'} · the export has no Carrier column, so it is read
+              : `No claims name a carrier ${liveYear() ? 'this year' : `in ${year}`}`} · the export has no Carrier column, so it is read
               from the department, claim type and description · the six reason columns are a
               breakdown of Claims, not six extra claims: each claim is counted against one reason or
               against "not a carrier fault", so they add up · no claim rate, because the export

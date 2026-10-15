@@ -1,47 +1,21 @@
 // Shared UI helpers, session and layout used across all pages.
 
-const SESSION_KEY = 'claims_portal_session';
-
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------
-// This is a static prototype with no backend, so "signing in" writes the chosen
-// user to localStorage and every page reads it. There is no real credential
-// check here: the login page matches the email to a known user and nothing more.
-// Replace setSession/getSession with a real token call before this goes live.
+// This is a static prototype with no backend and no sign-in. The app runs as a
+// single built-in operator so every page can be opened directly and reads the
+// same scope. The account is resolved from OWNERS rather than hard-coded, so the
+// name, role and id stay data-driven; there is no admin sign-in page any more.
+// Swap this for a real token call before this goes live.
 
-function setSession(user) {
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id, name: user.name, role: user.role, email: user.email }));
-  } catch (e) {
-    /* storage blocked (private mode) - the page still works for this session */
-  }
-  return user;
+function defaultUser() {
+  const list = typeof OWNERS !== 'undefined' ? OWNERS : [];
+  return list.find((o) => o.role === 'Admin' && o.status !== 'Inactive') || list[0] || null;
 }
 
 function getSession() {
-  try {
-    const s = JSON.parse(localStorage.getItem(SESSION_KEY));
-    // Re-resolve against OWNERS so a stale or hand-edited session can't invent a role.
-    if (s && typeof OWNERS !== 'undefined') {
-      const real = OWNERS.find((o) => o.id === s.id);
-      if (real) return { id: real.id, name: real.name, role: real.role, email: real.email };
-    }
-  } catch (e) {
-    /* corrupt value - treat as signed out */
-  }
-  return null;
-}
-
-function clearSession() {
-  try {
-    localStorage.removeItem(SESSION_KEY);
-  } catch (e) {}
-}
-
-function signOut() {
-  clearSession();
-  location.href = 'login.html';
+  return defaultUser();
 }
 
 function isAdmin() {
@@ -49,24 +23,15 @@ function isAdmin() {
   return !!s && s.role === 'Admin';
 }
 
-// Page guards. Both return null after redirecting, so call them as:
-//   if (!requireAuth()) return;
+// Pages still call these as `if (!requireAuth()) return;`. With no sign-in there
+// is nothing to guard, so they just hand back the built-in operator. The call
+// sites stay put so a real auth layer can slot back in without touching a page.
 function requireAuth() {
-  const s = getSession();
-  if (!s) {
-    location.replace('login.html');
-    return null;
-  }
-  return s;
+  return getSession();
 }
 
 function requireAdmin() {
-  const s = requireAuth();
-  if (s && s.role !== 'Admin') {
-    location.replace('dashboard.html');
-    return null;
-  }
-  return s;
+  return getSession();
 }
 
 // ---------------------------------------------------------------------------
@@ -400,8 +365,7 @@ function header(active, user) {
     `<header><a class="logo" href="dashboard.html"><i></i>Claims Portal</a><nav>${dashTab}${nav}</nav>` +
     `<div class="hright"><span class="role-chip ${user.role === 'Admin' ? 'adm' : 'mgr'}"><i></i>${user.role} · ${esc(user.name)}</span>` +
     `<button class="icon-btn" onclick="toast('No notifications')" title="Notifications">🔔</button>` +
-    `<div class="avatar">${initials(user.name)}</div>` +
-    `<button class="btn ghost s" onclick="signOut()">Sign out</button></div></header>`
+    `<div class="avatar">${initials(user.name)}</div></div></header>`
   );
 }
 

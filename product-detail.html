@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claims Portal – Product Detail</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script src="products.js"></script>
+  <script>
+    // -----------------------------------------------------------------------
+    // Product Detail. Reached ONLY by clicking a product in the Orders page
+    // "Problem Products" section - it is deliberately absent from the top nav,
+    // the same way Claim Detail and Order Detail are drill-through views.
+    //
+    // Every figure on this page comes from the clearly-labelled sample set in
+    // products.js, not from the claims export: the export carries only OrderID,
+    // so Product / Customer / Quantity / Price have to be joined in from a
+    // separate order-system export later. The charts below mirror the components
+    // already on the Dashboard - the line, donut and horizontal-bar patterns -
+    // rather than introducing new chart types.
+    // -----------------------------------------------------------------------
+
+    // Same colour set as the Dashboard donut, so a claim type has one colour
+    // across the app.
+    const COLORS = [
+      '#4269d0', '#e87d24', '#149e6e', '#911eb4',
+      '#56b4e9', '#d3455b', '#8c6d31', '#f0c941'
+    ];
+
+    const orderOwners = (o) => (o[8] || '').split('~').filter(Boolean);
+    const orderLabel = (o) => o[7] || 'Customer Order';
+    const CARRIER_MIXED = 'UPS/FedEx';
+
+    function carrierCell(c) {
+      if (!c) return '<span class="mu" style="font-size:11px" title="No claim on this order names a carrier in its department, type or description.">—</span>';
+      const mixed = c === CARRIER_MIXED;
+      return `<span${mixed ? ' class="b Med" title="Claims on this order name both UPS and FedEx, so it is not filed under either."' : ''}>${esc(c)}</span>`;
+    }
+
+    // ---------- charts (mirror the Dashboard components) ----------
+    // The donut is the Dashboard's ring plus its per-slice rows, reused here for
+    // a product's claim types. The top slice's share sits in the centre, the way
+    // the warehouse ring prints its top site.
+    function donutChart(data) {
+      if (!data.length) return '<p class="mu">No claim types to show for this product.</p>';
+      const total = data.reduce((s, d) => s + d[1], 0) || 1;
+      const top = data.slice().sort((a, b) => b[1] - a[1])[0];
+      const GAP = 1.2;
+      let offset = 25;
+      const arcs = data.map((d, n) => {
+        const p = (d[1] / total) * 100;
+        const draw = Math.max(p - GAP, Math.min(p, 0.35));
+        const c = COLORS[n % COLORS.length];
+        const arc = `<circle r="15.9" cx="21" cy="21" fill="none" stroke="${c}" stroke-width="6" stroke-dasharray="${draw.toFixed(2)} ${(100 - draw).toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"><title>${esc(d[0])}: ${num(d[1])} claims (${p.toFixed(1)}%)</title></circle>`;
+        offset -= p;
+        return arc;
+      }).join('');
+      const rows = data.map((d, n) => `
+        <div class="drow">
+          <div class="dline">
+            <span class="dlbl"><i style="background:${COLORS[n % COLORS.length]}"></i><span title="${esc(d[0])}">${esc(d[0])}</span></span>
+            <b>${num(d[1])}</b><em>${((d[1] / total) * 100).toFixed(1)}%</em>
+          </div>
+          <div class="trk"><span style="width:${((d[1] / total) * 100).toFixed(1)}%;background:${COLORS[n % COLORS.length]}"></span></div>
+        </div>`).join('');
+      return (
+        `<div class="dtop">
+          <svg class="donut" width="132" height="132" viewBox="0 0 42 42" role="img" aria-label="Claim types for this product">${arcs}` +
+          `<text x="21" y="22" text-anchor="middle" font-size="6.2" font-weight="600" fill="currentColor">${((top[1] / total) * 100).toFixed(1)}%</text>` +
+          `<text x="21" y="26.4" text-anchor="middle" font-size="2.5" font-weight="600" fill="#8fa69a" letter-spacing=".06em">TOP TYPE</text></svg>
+        </div>
+        <div class="dlist">${rows}</div>`
+      );
+    }
+
+    // Single-series month line, drawn with the same SVG pieces and .mchart
+    // styles as the Dashboard's monthly trend.
+    function niceScale(raw, steps) {
+      const s = steps || 4;
+      const rough = Math.max(raw, 1) / s;
+      const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+      const norm = rough / mag;
+      const step = Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag);
+      return { step, top: step * s };
+    }
+    const TL = { w: 340, h: 190, l: 40, r: 6, t: 10, b: 30 };
+
+    function lineChart(values, labels) {
+      if (!values || !values.length) return '<p class="mu">No monthly claim data for this product.</p>';
+      const n = values.length;
+      const pw = TL.w - TL.l - TL.r;
+      const ph = TL.h - TL.t - TL.b;
+      const base = TL.t + ph;
+      const x = (i) => +(n > 1 ? TL.l + (i * pw) / (n - 1) : TL.l + pw / 2).toFixed(1);
+      const { step, top } = niceScale(Math.max(...values, 1));
+      const y = (v) => +(base - (v / top) * ph).toFixed(1);
+      const pts = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
+
+      const grid = [];
+      for (let v = 0; v <= top + step / 2; v += step) {
+        grid.push(`<line class="gl${v === 0 ? ' base' : ''}" x1="${TL.l}" y1="${y(v)}" x2="${TL.w - TL.r}" y2="${y(v)}"/>`);
+        grid.push(`<text class="tk" x="${TL.l - 6}" y="${y(v)}" text-anchor="end" dominant-baseline="middle">${num(v)}</text>`);
+      }
+      const dots = values.map((v, i) =>
+        `<circle class="pt" cx="${x(i)}" cy="${y(v)}" r="2.5" fill="#6366f1"><title>${labels[i]}: ${num(v)} claim${v === 1 ? '' : 's'}</title></circle>`).join('');
+      const foot = labels.map((m, i) => `<text class="mo" x="${x(i)}" y="${base + 12}" text-anchor="middle">${m}</text>`).join('');
+
+      return (
+        `<div class="mchart"><svg class="trend" viewBox="0 0 ${TL.w} ${TL.h}" width="100%" role="img" aria-label="Claims per month over the last 12 months">` +
+        `${grid.join('')}<polyline class="cu" points="${pts}"/>${dots}${foot}</svg></div>`
+      );
+    }
+
+    // Horizontal bars are the Dashboard's "Top claim types" rows, reused for
+    // supplier claim rate. A rate is bounded, so the track is scaled to the
+    // highest rate on screen rather than to 100%.
+    function hbarChart(rows, rate, maxRate) {
+      return rows.map((r) => `
+        <div class="hb" title="${esc(r[0])}: ${r[2]} claims on ${r[1]} orders · ${rate(r).toFixed(1)}% claim rate">
+          <div title="${esc(r[0])}">${esc(r[0])}</div>
+          <div class="trk"><span style="width:${maxRate ? (rate(r) / maxRate * 100).toFixed(1) : 0}%"></span></div>
+          <b>${rate(r).toFixed(1)}%</b>
+        </div>`).join('');
+    }
+
+    function render() {
+      const params = new URLSearchParams(location.search);
+      const wanted = params.get('id');
+      const p = productById(wanted);
+
+      // No product matches the id: say so rather than inventing one.
+      if (!p) {
+        document.getElementById('app').innerHTML = `
+          <h1 style="margin-bottom:8px">Product not found</h1>
+          <div class="card">
+            <p class="mu">${wanted
+              ? `No product matches <b>${esc(wanted)}</b> in the sample set.`
+              : 'No product was requested. Open a product from the Orders page to see its detail.'}</p>
+            <div class="row" style="gap:8px;margin-top:12px">
+              <a class="btn p s" href="orders.html">Back to orders</a>
+            </div>
+          </div>`;
+        return;
+      }
+
+      // A manager may only open a product that touches an order in their own
+      // caseload, the same rule the Orders page applies to the section.
+      const s = getSession();
+      const myOrders = isAdmin() ? ORDERS : ORDERS.filter((o) => orderOwners(o).includes(s.id));
+      if (!isAdmin() && !p.orderIds.some((id) => myOrders.some((o) => o[0] === id))) {
+        document.getElementById('app').innerHTML = `
+          <h1 style="margin-bottom:8px">Product not available</h1>
+          <div class="card">
+            <p class="mu"><b>${esc(p.name)}</b> does not touch an order in your caseload.</p>
+            <div class="row" style="gap:8px;margin-top:12px">
+              <a class="btn p s" href="orders.html">Back to orders</a>
+            </div>
+          </div>`;
+        return;
+      }
+
+      const rate = productClaimRate(p) * 100;
+      const tier = productTier(p);
+
+      // Orders on this product that are embedded in the portal (the full count
+      // lives in the order-system export). Reuses the Orders table row shape.
+      const shownOrders = ORDERS.filter((o) => p.orderIds.includes(o[0]));
+
+      // Supplier claim rates. The whole supplier card is only drawn when a
+      // product has more than one supplier, so there is something to compare.
+      const supplierRate = (r) => (r[1] ? (r[2] / r[1]) * 100 : 0);
+      const suppliersSorted = p.suppliers.slice().sort((a, b) => supplierRate(b) - supplierRate(a));
+      const maxSupplierRate = Math.max(...suppliersSorted.map(supplierRate), 1);
+      const showSuppliers = suppliersSorted.length > 1;
+
+      const finCard = `
+        <div class="fin">
+          <div><em>Total orders</em><b>${num(p.totalOrders)}</b></div>
+          <div><em>Total claims</em><b>${num(p.totalClaims)}</b></div>
+          <div><em>Claim rate</em><b>${rate.toFixed(1)}%</b></div>
+          <div><em>Suppliers</em><b>${num(p.suppliers.length)}</b></div>
+        </div>`;
+
+      document.getElementById('app').innerHTML = `
+        <a class="mu" style="cursor:pointer" href="orders.html">← Orders</a>
+        <div class="row" style="margin:8px 0 14px">
+          <h1>${esc(p.name)}</h1>
+          ${tierBadge(tier)}
+          <span class="b Med" title="Product, customer, quantity and price are not columns in the claims export. Every figure on this page is sample data for the prototype, not measured from the CSV.">Sample data</span>
+          <span class="mu" style="font-size:12px">${esc(p.id)}</span>
+          <div class="sp"></div>
+          <h1>${rate.toFixed(1)}%</h1>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          ${finCard}
+          <p class="mu" style="font-size:11px;margin:12px 0 0;line-height:1.6">
+            Product, customer, quantity and price are not in the claims export, which carries only an
+            OrderID. The figures here are <b>sample data</b> (products.js) standing in for a future
+            order-system export joined by Order ID. A <b>${esc(tier)}</b> tier means
+            ${tier === 'Critical' ? 'a claim rate above 15% with at least 50 orders behind it'
+              : tier === 'Watch' ? 'either a high rate on too few orders to trust, or a moderate rate at volume'
+              : 'neither a high rate nor enough volume to flag'}.
+          </p>
+        </div>
+
+        <div class="grid g2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="row cht"><h3>Claims per month</h3><div class="sp"></div>
+              <span class="mu" style="font-size:12px">Rolling 12 months ending Sep 2026</span></div>
+            ${lineChart(p.trend, PRODUCT_TREND_MONTHS)}
+            <div class="row" style="margin-top:10px">
+              <span class="mu" style="font-size:12px">${num(p.trend.reduce((a, v) => a + v, 0))} sample claims in this 12-month window</span>
+            </div>
+          </div>
+
+          <div class="card dcard">
+            <h3>Claim types</h3>
+            ${donutChart(p.types)}
+          </div>
+        </div>
+
+        ${showSuppliers ? `
+        <div class="card" style="margin-bottom:16px">
+          <h3>Suppliers</h3>
+          <span class="mu" style="font-size:12px">Claim rate per supplier for this product</span>
+          <div style="margin-top:10px">${hbarChart(suppliersSorted, supplierRate, maxSupplierRate)}</div>
+          <p class="mu" style="font-size:11px;margin:12px 0 0">
+            Only shown because this product has more than one supplier (${num(suppliersSorted.length)}).
+          </p>
+        </div>` : ''}
+
+        <div class="row sec" style="margin-top:24px">
+          <div><h3>Orders containing this product</h3>
+            <span class="mu">${shownOrders.length
+              ? `${num(shownOrders.length)} order${shownOrders.length === 1 ? '' : 's'} from this portal's embedded set`
+              : 'none of this product&rsquo;s orders are in the embedded set'}</span></div>
+        </div>
+        <div class="card tw"><table>
+          <tr><th>Order ID</th><th>Type</th><th>Carrier</th><th>Claims</th><th>Open</th><th>Credit</th><th>Depts</th><th>First–last claim</th></tr>
+          ${shownOrders.length ? shownOrders.map((o) => `
+            <tr class="cl" onclick="location.href='orders.html'">
+              <td><b>${o[0]}</b>${o[1] > 1 ? ` <span class="b Med">repeat ×${o[1]}</span>` : ''}</td>
+              <td>${esc(orderLabel(o))}</td>
+              <td>${carrierCell(o[9])}</td>
+              <td>${num(o[1])}</td>
+              <td>${o[3] ? `<span class="b Med">${num(o[3])}</span>` : '0'}</td>
+              <td>${usd(o[2])}</td>
+              <td>${num(o[4])}</td>
+              <td class="mu" style="font-size:11px">${esc(fmtDate(o[5]))} → ${esc(fmtDate(o[6]))}</td>
+            </tr>`).join('')
+            : `<tr><td colspan="8" class="mu">No order containing <b>${esc(p.name)}</b> is carried in this portal's embedded order set. ${PRODUCT_DATA_MISSING}.</td></tr>`}
+        </table></div>
+        <p class="mu" style="font-size:11px;margin-top:12px;line-height:1.6">
+          The full product figure is <b>${num(p.totalOrders)} orders / ${num(p.totalClaims)} claims</b> from the
+          sample order-system set; the table lists only the orders embedded in this portal. The export itself
+          has no product column, so no real order can be matched to a product until the join exists &mdash;
+          ${PRODUCT_DATA_MISSING} is shown rather than a placeholder figure.
+        </p>`;
+    }
+
+    function main() {
+      if (!requireAuth()) return;
+      document.body.innerHTML = layout('orders');
+      render();
+    }
+  </script>
+</head>
+<body>
+  <script>main();</script>
+</body>
+</html>

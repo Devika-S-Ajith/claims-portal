@@ -8,6 +8,7 @@
   <link href="style.css" rel="stylesheet">
   <script src="data.js"></script>
   <script src="app.js"></script>
+  <script src="products.js"></script>
   <script>
     // ------------------------------------------------------------------
     // What is actually listed here, because the list is not the export.
@@ -64,6 +65,33 @@
         (withWhy ? (mixed ? ' <span class="mu" style="font-size:11px">both named in the claims</span>'
           : ' <span class="mu" style="font-size:11px">from the claims</span>') : '');
     }
+
+    // ---------------------------------------------------------------- products
+    // Product, customer, quantity and price are not columns in the claims export;
+    // they arrive later from a separate order-system export joined by OrderID.
+    // Until that join exists the section below reads the clearly-labelled sample
+    // set in products.js. It is scoped the same way the orders table is: a
+    // manager only sees products that touch an order in their own caseload.
+    const PRODUCT_TIER_RANK = { Critical: 0, Watch: 1, Normal: 2 };
+
+    function scopedProducts() {
+      const s = getSession();
+      const all = SAMPLE_PRODUCTS.slice();
+      if (!s || s.role === 'Admin') return all;
+      const mine = new Set(ORDERS.filter((o) => orderOwners(o).includes(s.id)).map((o) => o[0]));
+      return all.filter((p) => p.orderIds.some((id) => mine.has(id)));
+    }
+
+    // Worst first: tier, then claim rate, then volume. Sorting on rate alone
+    // would let a thin-base product leapfrog a larger, better-supported one.
+    function sortedProducts(list) {
+      return list.slice().sort((a, b) =>
+        PRODUCT_TIER_RANK[productTier(a)] - PRODUCT_TIER_RANK[productTier(b)] ||
+        productClaimRate(b) - productClaimRate(a) ||
+        b.totalOrders - a.totalOrders);
+    }
+
+    function openProduct(id) { location.href = 'product-detail.html?id=' + encodeURIComponent(id); }
 
     // Role scope first, then the reader's own cuts. A manager is already down to
     // their caseload here, so the owner filter is only offered to an admin - for
@@ -153,11 +181,23 @@
         ? scopedClaims().filter((c) => c.or === order[0])
         : [];
 
+      // Sample product rows for this order, or an empty list when the join has
+      // no product for it. The detail panel prints PRODUCT_DATA_MISSING in that
+      // case rather than an invented product.
+      const orderProducts = order ? productsForOrder(order[0]) : [];
+
       const totalCredit = orders.reduce((a, o) => a + o[2], 0);
       const totalClaims = orders.reduce((a, o) => a + o[1], 0);
       const repeat = orders.filter((o) => o[1] > 1).length;
       const filterLabel = (FILTERS.find((x) => x[0] === orderFilter) || FILTERS[0])[2];
       const narrowed = orderFilter !== 'all' || orderQuery.trim() || orderOwner;
+
+      // Problem Products. Sample product rows scoped to the signed-in role.
+      const products = scopedProducts();
+      const productsSorted = sortedProducts(products);
+      const prodCritical = products.filter((p) => productTier(p) === 'Critical').length;
+      const prodWatch = products.filter((p) => productTier(p) === 'Watch').length;
+      const prodClaims = products.reduce((a, p) => a + p.totalClaims, 0);
 
       document.getElementById('app').innerHTML = `
         <div class="row" style="margin-bottom:4px">
@@ -205,6 +245,9 @@
           <div class="card"><h3>Order ${order[0]}</h3>
             <dl class="dl">
               <dt>Order type</dt><dd>${esc(orderLabel(order))}</dd>
+              <dt>Products</dt><dd>${orderProducts.length
+                ? orderProducts.map((p) => `<a style="color:var(--pr)" href="product-detail.html?id=${encodeURIComponent(p.id)}">${esc(p.name)}</a> <span class="b ${PRODUCT_TIER_CLASS[productTier(p)]}">${esc(productTier(p))}</span> <span class="mu" style="font-size:11px">sample</span>`).join('<br>')
+                : `<span class="mu" title="No order-system join exists yet, and this order is not in the sample set.">${PRODUCT_DATA_MISSING}.</span>`}</dd>
               <dt>Carrier</dt><dd>${carrierCell(order[9], true)}</dd>
               <dt>Claims raised</dt><dd>${num(order[1])}${order[1] > 1 ? ` <span class="b Med">repeat claim order</span>` : ''}</dd>
               <dt>Still open</dt><dd>${num(order[3])}</dd>
@@ -221,10 +264,12 @@
             </dl>
             <p class="mu" style="font-size:11px;margin-top:12px;line-height:1.6">
               The export contains no customer, product, quantity or price fields, so those columns
-              cannot be shown for any order. Everything above is measured from the claim rows that
-              reference this OrderID. Carrier is the exception: the export has no carrier column
-              either, so it is read out of the department, claim type and description of this order's
-              claims. ${num(orders.length ? ORDERS.filter((o) => o[9]).length : 0)} of the ${num(ORDERS.length)}
+              cannot be shown for any order. Everything above except Products is measured from the
+              claim rows that reference this OrderID. Products is the exception the other way: it is
+              <b>sample data</b> from the future order-system join (see products.js), or the plain
+              "not available" note when this order is not in that sample set &mdash; never an invented
+              figure. Carrier is likewise not a column: it is read out of the department, claim type
+              and description of this order's claims. ${num(orders.length ? ORDERS.filter((o) => o[9]).length : 0)} of the ${num(ORDERS.length)}
               listed orders name one, and the rest show a dash because "not stated" is not "shipped
               in our own van".
             </p>
@@ -239,7 +284,47 @@
           <div class="card kpi"><small>Repeat-claim orders</small><b>${num(repeat)}</b><span class="up">${pct(repeat, orders.length)} of orders</span></div>
           <div class="card kpi"><small>Credit on these orders</small><b>${usd(totalCredit)}</b><span class="flat">${usd(orders.length ? totalCredit / orders.length : 0)} average</span></div>
           <div class="card kpi"><small>Orders with open claims</small><b>${num(orders.filter((o) => o[3] > 0).length)}</b><span class="up">still unresolved work</span></div>
-        </div>`;
+        </div>
+
+        <div class="row sec" style="margin-top:28px">
+          <div><h3>Problem Products</h3><span class="mu">Claim rate by product, worst first · click a product for its detail</span></div>
+          <div class="sp"></div>
+          <span class="b Med" title="Product, customer, quantity and price are not columns in the claims export. These figures are sample data for the prototype, not measured from the CSV.">Sample data</span>
+        </div>
+        <div class="grid g4">
+          <div class="card kpi"><small>Products tracked</small><b>${num(products.length)}</b><span class="flat">in your scope</span></div>
+          <div class="card kpi"><small>Critical</small><b>${num(prodCritical)}</b><span class="up">high rate with enough volume to trust</span></div>
+          <div class="card kpi"><small>Watch</small><b>${num(prodWatch)}</b><span class="flat">thin base, or a moderate rate at volume</span></div>
+          <div class="card kpi"><small>Claims behind them</small><b>${num(prodClaims)}</b><span class="flat">sample claims on these products</span></div>
+        </div>
+        <div class="card tw" style="margin-top:16px"><table>
+          <tr><th>Product</th><th>Tier</th><th>Claim rate</th><th>Orders</th><th>Claims</th><th>Top claim type</th><th>Suppliers</th></tr>
+          ${productsSorted.length ? productsSorted.map((p) => {
+            const tier = productTier(p);
+            const top = p.types[0] || ['—', 0];
+            return `
+            <tr class="cl" onclick="openProduct('${p.id}')" tabindex="0" role="link"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}">
+              <td><b>${esc(p.name)}</b> <span class="mu" style="font-size:11px">${esc(p.id)}</span></td>
+              <td>${tierBadge(tier)}</td>
+              <td><b style="font-variant-numeric:tabular-nums">${(productClaimRate(p) * 100).toFixed(1)}%</b></td>
+              <td>${num(p.totalOrders)}</td>
+              <td>${num(p.totalClaims)}</td>
+              <td>${esc(top[0])} <span class="mu" style="font-size:11px">${num(top[1])}</span></td>
+              <td>${p.suppliers.length > 1 ? `${num(p.suppliers.length)} suppliers` : '1 supplier'}</td>
+            </tr>`;
+          }).join('')
+            : `<tr><td colspan="7" class="mu">No product data is available for the orders in your scope.</td></tr>`}
+        </table></div>
+        <p class="mu" style="font-size:11px;margin-top:12px;line-height:1.6">
+          Product, customer, quantity and price are not columns in the claims export. The figures in this
+          section are <b>sample data</b> (see products.js), standing in for a future order-system export
+          joined by Order ID &mdash; they are not measured from the CSV. A product is listed only once it
+          touches an order in your scope. Tier rule: <b>Critical</b> needs a claim rate above 15% and at
+          least 50 orders behind it; <b>Watch</b> is either a high rate on too few orders to trust, or a
+          moderate rate at volume; everything else is <b>Normal</b>. Ranking puts tier first, so a
+          thin-base product cannot outrank a larger, better-supported one.
+        </p>`;
 
       // Re-rendering the page replaces the search box, which would otherwise drop
       // focus on the first keystroke and make typing an order ID impossible.
