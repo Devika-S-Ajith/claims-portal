@@ -851,35 +851,46 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         .map((t) => ({ ty: t.ty, date: t.date, n: counts[t.ty], mock: true }));
     }
 
-    // The moving notice at the top of the page. It exists only while there is
-    // something to say: a claim type the portal has never seen is worth a
-    // glance, but it is a notice rather than a metric, so it runs once above
-    // the stat line and is deliberately not given a card, a tile or a seat in
-    // the Needs Attention feed. Each item deep-links into the claims table
-    // already filtered to that type and year.
-    function typeTicker() {
+    // The alert at the top of the page, replacing the scrolling strip this
+    // started as: a moving ticker read as clutter, so the same information now
+    // sits in one dismissible alert - headline, the types spelled out as links,
+    // and a close button. The colours are the portal's existing flag family
+    // (.err, .tag.p1) and the accent edge matches how priority is marked on
+    // the feed cards, so it reads as part of the UI rather than a new badge
+    // style. Dismissal is remembered per set of types in sessionStorage, so
+    // closing it does not reappear on the next render, while a genuinely new
+    // type still raises a fresh alert. It renders only while there is something
+    // to say; an ordinary year shows nothing at all.
+    function dismissNewType(btn) {
+      try { sessionStorage.setItem(btn.getAttribute('data-sig'), '1'); } catch (e) { /* private mode: dismiss for this render only */ }
+      const box = btn.closest('.alert');
+      if (box) box.remove();
+    }
+    function typeAlert() {
       const items = newTypesIn(year);
       if (!items.length) return '';
-      const one = items.map((t) => {
+      const sig = `newtype|${year}|${items.map((t) => t.ty).join(',')}`;
+      try { if (sessionStorage.getItem(sig)) return ''; } catch (e) { /* no storage: always show */ }
+      const body = items.map((t) => {
         const when = t.date
           ? `first raised ${MONTHS[+t.date.slice(5, 7) - 1]} ${t.date.slice(0, 4)}`
           : `raised in ${year}`;
-        return `<a class="tk-i" href="${claimsHref({ ty: t.ty, yr: String(year) })}" title="Open ${esc(t.ty)} claims in the table"><b>${esc(t.ty)}</b><span>${when} · ${num(t.n)} claim${t.n === 1 ? '' : 's'}</span></a>`;
+        return `<a class="al-it" href="${claimsHref({ ty: t.ty, yr: String(year) })}" title="Open ${esc(t.ty)} claims in the table"><b>${esc(t.ty)}</b> · ${when} · ${num(t.n)} claim${t.n === 1 ? '' : 's'}</a>`;
       }).join('');
-      // Two identical segments, so a -50% translate lands exactly on the seam
-      // and the loop is continuous; the second is hidden from screen readers,
-      // which would otherwise announce every item twice. The Sample data pill
-      // rides beside the label whenever the list is the mock, so nobody reads
-      // a stand-in entry as a real flag - the same badge orders.html uses for
-      // its sample product figures.
+      // The Sample data pill rides in the headline whenever the list is the
+      // mock, so nobody reads a stand-in entry as a real flag - the same badge
+      // orders.html uses for its sample product figures.
       const isMock = items.some((t) => t.mock);
       return (
-        `<div class="ticker" role="status" aria-label="${items.length} new claim type${items.length === 1 ? '' : 's'} in ${year}">` +
-        `<span class="tk-l">New claim type${items.length === 1 ? '' : 's'}</span>` +
-        (isMock ? `<span class="b Med tk-m" title="The export carries no brand-new claim type in ${year} yet, so these are stand-in entries showing how the notice works.">Sample data</span>` : '') +
-        `<div class="tk-w"><div class="tk-t">` +
-        `<span class="tk-seg">${one}</span><span class="tk-seg" aria-hidden="true">${one}</span>` +
-        `</div></div></div>`
+        `<div class="alert" role="alert">` +
+        `<div class="al-b">` +
+        `<b class="al-h">New claim type${items.length === 1 ? '' : 's'} in ${year}` +
+        (isMock ? `<span class="b Med" title="The export carries no brand-new claim type in ${year} yet, so these are stand-in entries showing how the alert works.">Sample data</span>` : '') +
+        `</b>` +
+        `<span class="al-items">${body}</span>` +
+        `</div>` +
+        `<button class="al-x" type="button" aria-label="Dismiss this alert" data-sig="${esc(sig)}" onclick="dismissNewType(this)">&#215;</button>` +
+        `</div>`
       );
     }
 
@@ -1391,9 +1402,9 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
           <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
         </div>
 
-        <!-- moving notice; renders only when the year carries a claim type the
+        <!-- new claim type alert; renders only when the year carries a type the
              export has never seen before, so an ordinary year shows nothing -->
-        ${typeTicker()}
+        ${typeAlert()}
 
         <div class="stats">
           ${statLine.map(([label, value, note]) => `

@@ -294,29 +294,28 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .act-card .pc{margin-bottom:10px}
 .act-card .go{margin-top:0;margin-left:auto}
 
-/* ---- moving notice: new claim types ---- */
-/* A ticker, not a tile. A claim type the export has never carried before is
-   worth a glance when it happens, but it is a notice rather than a metric, so
-   it gets no card, no icon and no seat in the feed - just one strip above the
-   stat line, and only while there is something to announce. The colours are
-   the portal's existing flag family (.err, .tag.p1), so it reads as the same
-   warning the rest of the UI already uses rather than a new badge style.
-   Pausing on hover lets a link be clicked; prefers-reduced-motion stops the
-   roll and turns the strip into a normal horizontal scroll. */
-.ticker{display:flex;align-items:center;gap:14px;margin:6px 0 10px;padding:8px 14px;border:1px solid #f5c9c5;background:#fdebe9;border-radius:10px;font-size:12px;overflow:hidden}
-.tk-l{flex:none;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#c4453a;padding-right:14px;border-right:1px solid #f5c9c5;white-space:nowrap}
-/* Sample data pill: the shared .b badge, tightened to the strip's rhythm so it
-   sits on the label's line instead of stretching the whole row. */
-.ticker .tk-m{flex:none;font-size:10px;padding:2px 8px}
-.tk-w{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
-.tk-t{display:flex;width:max-content;animation:tkroll 34s linear infinite}
-.ticker:hover .tk-t{animation-play-state:paused}
-.tk-seg{display:inline-flex;gap:30px;padding-right:30px}
-.tk-i{display:inline-flex;align-items:baseline;gap:7px;color:#8a3b37;text-decoration:none;white-space:nowrap}
-.tk-i b{font-weight:700;color:#c4453a}
-.tk-i:hover span{text-decoration:underline}
-@keyframes tkroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-@media(prefers-reduced-motion:reduce){.tk-t{animation:none}.tk-w{overflow-x:auto;-webkit-mask-image:none;mask-image:none}}
+/* ---- alert: new claim types ---- */
+/* An alert, not a tile and not a marquee. A claim type the export has never
+   carried before is worth a person's attention when it happens, but it is an
+   announcement rather than a metric, so it gets no card, no icon and no seat
+   in the feed - one dismissible alert above the stat line, and only while
+   there is something to say. The colours are the portal's existing flag family
+   (.err, .tag.p1) so it reads as the same warning the rest of the UI already
+   uses, and the accent edge matches how priority is marked on the feed cards.
+   Nothing animates: the first version scrolled, and a moving ticker in a
+   dashboard reads as clutter and makes the whole page feel unsettled. */
+.alert{display:flex;align-items:flex-start;gap:12px;margin:6px 0 10px;padding:10px 14px;background:#fdebe9;border:1px solid #f5c9c5;border-left:4px solid #c4453a;border-radius:10px;font-size:12px;color:#8a3b37}
+.al-b{display:flex;flex-direction:column;gap:5px;min-width:0}
+.al-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#c4453a}
+.al-items{display:flex;flex-wrap:wrap;gap:6px 20px}
+.al-it{color:#8a3b37;text-decoration:none}
+.al-it b{font-weight:700;color:#c4453a}
+.al-it:hover{text-decoration:underline}
+/* Close: quiet until hovered, so the alert reads first and its dismissal
+   second. The × is a real button for keyboard and screen-reader users. */
+.al-x{margin-left:auto;flex:none;background:none;border:0;padding:2px 6px;border-radius:6px;color:#c4453a;font-size:16px;line-height:1.2;cursor:pointer}
+.al-x:hover{background:#f5c9c5}
+.al-x:focus-visible{outline:2px solid #c4453a;outline-offset:1px}
 
 /* ---- dashboard: the "needs attention" feed ---- */
 /* The feed used to be deliberately flat - no tint, no lift, no shadow - on the
