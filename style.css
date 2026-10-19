@@ -1,6 +1,6 @@
-:root{--bg:#f6f7fc;--card:#fff;--tx:#1b1d33;--mu:#71758f;--pr:#6366f1;--pr-d:#4f46e5;--pl:#eef0ff;--bd:#e4e6f2;--bd2:#c6cbe4;--wn:#e8a13a;--er:#d9534f;--gn:#147a4c;--bl:#3b82c4;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0f1122;--card:#181a30;--tx:#eceefc;--mu:#a3a8cb;--pl:#232658;--bd:#2c2f55;--bd2:#454a7d;--gn:#5fd3a0;--er:#f08079}}
-:root[data-theme=dark]{--bg:#0f1122;--card:#181a30;--tx:#eceefc;--mu:#a3a8cb;--pl:#232658;--bd:#2c2f55;--bd2:#454a7d;--gn:#5fd3a0;--er:#f08079}
+:root{--bg:#f6f7fc;--card:#fff;--tx:#1b1d33;--mu:#71758f;--pr:#6366f1;--pr-d:#4f46e5;--pl:#eef0ff;--bd:#e4e6f2;--bd2:#c6cbe4;--wn:#e8a13a;--er:#d9534f;--gn:#147a4c;--bl:#3b82c4;--p1:#c4453a;--p2:#b9770e;--p3:#5b46c4;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0f1122;--card:#181a30;--tx:#eceefc;--mu:#a3a8cb;--pl:#232658;--bd:#2c2f55;--bd2:#454a7d;--gn:#5fd3a0;--er:#f08079;--p1:#f08079;--p2:#f2c778;--p3:#a894ff}}
+:root[data-theme=dark]{--bg:#0f1122;--card:#181a30;--tx:#eceefc;--mu:#a3a8cb;--pl:#232658;--bd:#2c2f55;--bd2:#454a7d;--gn:#5fd3a0;--er:#f08079;--p1:#f08079;--p2:#f2c778;--p3:#a894ff}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.55 'Plus Jakarta Sans',system-ui,sans-serif}
 ::selection{background:rgba(99,102,241,.22)}
@@ -294,29 +294,90 @@ tr.cl.on td{background:color-mix(in srgb,var(--pl) 55%,transparent)}
 .act-card .pc{margin-bottom:10px}
 .act-card .go{margin-top:0;margin-left:auto}
 
+/* ---- moving notice: new claim types ---- */
+/* A ticker, not a tile. A claim type the export has never carried before is
+   worth a glance when it happens, but it is a notice rather than a metric, so
+   it gets no card, no icon and no seat in the feed - just one strip above the
+   stat line, and only while there is something to announce. The colours are
+   the portal's existing flag family (.err, .tag.p1), so it reads as the same
+   warning the rest of the UI already uses rather than a new badge style.
+   Pausing on hover lets a link be clicked; prefers-reduced-motion stops the
+   roll and turns the strip into a normal horizontal scroll. */
+.ticker{display:flex;align-items:center;gap:14px;margin:6px 0 10px;padding:8px 14px;border:1px solid #f5c9c5;background:#fdebe9;border-radius:10px;font-size:12px;overflow:hidden}
+.tk-l{flex:none;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#c4453a;padding-right:14px;border-right:1px solid #f5c9c5;white-space:nowrap}
+/* Sample data pill: the shared .b badge, tightened to the strip's rhythm so it
+   sits on the label's line instead of stretching the whole row. */
+.ticker .tk-m{flex:none;font-size:10px;padding:2px 8px}
+.tk-w{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
+.tk-t{display:flex;width:max-content;animation:tkroll 34s linear infinite}
+.ticker:hover .tk-t{animation-play-state:paused}
+.tk-seg{display:inline-flex;gap:30px;padding-right:30px}
+.tk-i{display:inline-flex;align-items:baseline;gap:7px;color:#8a3b37;text-decoration:none;white-space:nowrap}
+.tk-i b{font-weight:700;color:#c4453a}
+.tk-i:hover span{text-decoration:underline}
+@keyframes tkroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){.tk-t{animation:none}.tk-w{overflow-x:auto;-webkit-mask-image:none;mask-image:none}}
+
 /* ---- dashboard: the "needs attention" feed ---- */
-/* One flat list. No gradients, no lift, no shadow - the only things separating
-   one card from the next are its priority accent and its two tags, so the feed
-   reads as a queue rather than a set of unrelated tiles. */
+/* The feed used to be deliberately flat - no tint, no lift, no shadow - on the
+   theory that it should read as a queue rather than as tiles. In practice the
+   cards then disappeared into the page: a row of same-white boxes with grey
+   sub-text is exactly where the eye does NOT go, which is the wrong instinct
+   for a section called Needs Attention. Each priority now tints its own card,
+   colours its headline number and lifts on hover, so the three tiers differ by
+   more than a 4px left border while the shared structure still reads as one
+   queue. The tints are mixed against --card rather than hard-coded, so they
+   survive the dark theme. */
 .split{margin:30px 0 4px;border:0;border-top:1px solid var(--bd)}
 
 /* Priority tag, and the source tag beside it. Both are tinted pills with a
    darker tone of the same hue for the text, so they stay legible on the dark
-   theme without a separate dark-mode rule. */
+   theme without a separate dark-mode rule. The top tier carries a pulsing dot
+   as well as red, because colour alone never carries meaning - and a small
+   moving element is the one thing reliably proven to pull a first glance. */
 .tag{display:inline-flex;align-items:center;padding:2px 9px;border-radius:99px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.65;white-space:nowrap}
-.tag.p1{background:#fdebe9;color:#c4453a}
+.tag.p1{background:#fdebe9;color:#c4453a;position:relative;padding-left:19px}
+.tag.p1::before{content:"";position:absolute;left:9px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:99px;background:#c4453a;animation:tdot 1.6s ease-in-out infinite}
+@keyframes tdot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
+@media(prefers-reduced-motion:reduce){.tag.p1::before{animation:none}}
 .tag.p2{background:#fdf0da;color:#b9770e}
 .tag.p3{background:#efeaff;color:#5b46c4}
 .tag.sai{background:#efeaff;color:#5b46c4}
 .tag.smetric{background:color-mix(in srgb,var(--mu) 13%,transparent);color:var(--mu)}
-.ncard .tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.ncard .tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;justify-content:center}
 
-.ncard{display:flex;flex-direction:column;box-shadow:none;text-decoration:none;color:inherit;cursor:pointer;transition:border-color .15s;background:var(--card);border:1px solid var(--bd);border-left:4px solid var(--bd)}
-.ncard:hover{border-color:var(--bd2)}
-.ncard.p1{border-left-color:var(--er)}
-.ncard.p2{border-left-color:var(--wn)}
-.ncard.p3{border-left-color:#7c6cf0}
+/* The card keeps the plain card background - a tinted wash was tried here and
+   read as a foreign palette against the rest of the page. The tier is carried
+   by the accent border and the headline colour instead. Hover lifts the card
+   and adds the same shadow every other interactive card in the portal already
+   uses, so "this does something" is consistent. */
+.ncard{display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(16,24,40,.04);text-decoration:none;color:inherit;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .15s;background:var(--card);border:1px solid var(--bd);border-left:5px solid var(--bd)}
+/* The accent border rules below come after this one at the same specificity,
+   so a priority card keeps its accent on hover rather than going grey. */
+.ncard:hover{transform:translateY(-2px);border-color:var(--bd2);box-shadow:0 1px 2px rgba(16,24,40,.04),0 16px 30px -18px rgba(16,24,40,.28)}
+/* No background tint on the cards - the pastel washes clashed with the rest of
+   the page, so the tier is carried by the accent border and the text colour
+   only, which is how the rest of the portal marks priority. */
+.ncard.p1{border-left-color:var(--p1)}
+.ncard.p2{border-left-color:var(--p2)}
+.ncard.p3{border-left-color:var(--p3)}
+/* The headline number is the one thing the card exists to say, so it carries
+   the priority hue at full strength - and because it is the largest text on
+   the card it is also the first thing read. */
+.ncard.p1 .ac-n{color:var(--p1)}
+.ncard.p2 .ac-n{color:var(--p2)}
+.ncard.p3 .ac-n{color:var(--p3)}
 .ac-v{display:block;font-size:12px;color:var(--mu);margin-top:7px;line-height:1.45}
+/* Centred card body. The tag row, the headline number and the label all sit on
+   the card's centre line, which is what makes a card read as one statement
+   rather than as a left-aligned list of three lines. The description then hangs
+   below a hairline rule - the lightest line the palette offers - so the number
+   keeps the headline and the sub-line reads as its footnote. The action row is
+   centred too, because a left-flush button under a centred body looks like the
+   two halves came from different cards. */
+.ncard .ac-jump{text-align:center}
+.ncard .ac-v{margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--bd) 65%,transparent)}
+.ncard .ac-act{justify-content:center}
 /* The card is a div now, so the primary jump is a stretched link rather than the
    card element itself; the action row sits above it to stay clickable. */
 .ncard{position:relative}

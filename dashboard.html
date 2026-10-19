@@ -783,6 +783,106 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
       return `<a class="ac-view" href="${href}">${esc(l.label)} &#8599;</a>`;
     }
 
+    // ---------- claim types the export has never carried before ----------
+    // A type is NEW when its earliest dated claim in the whole export falls in
+    // the reporting year on screen - nothing of that name was ever raised before
+    // it. First appearance is a property of the export, not of the year being
+    // looked at, so the map is built once over CLAIMS and cached; only the year
+    // filter below re-runs on a year change.
+    //
+    // Undated claims (470 of them carry no date at all) still count towards the
+    // type but never win a "first" on date, because their empty date would sort
+    // ahead of every real one and stamp the type as new in a year it predates.
+    let typeFirsts = null;
+    function firstSeenByType() {
+      if (typeFirsts) return typeFirsts;
+      typeFirsts = new Map();
+      CLAIMS.forEach((c) => {
+        if (!c.ty) return;
+        const y = String(c.date || '').slice(0, 4);
+        let e = typeFirsts.get(c.ty);
+        if (!e) {
+          e = { year: y || '9999', date: '' };
+          typeFirsts.set(c.ty, e);
+        }
+        if (y && y < e.year) { e.year = y; e.date = ''; }
+        if (y && y === e.year && (!e.date || c.date < e.date)) e.date = c.date;
+      });
+      return typeFirsts;
+    }
+
+    // The new types for one reporting year, counted inside the viewer's scope so
+    // a manager is never pointed at a flag whose claims they cannot open. The
+    // export's first year is excluded: every type debuts in it, so flagging
+    // 2010 would be a ticker of every type that exists and would say nothing.
+    //
+    // Stand-in entries for the current year. 2026 carries no brand-new type yet
+    // (the newest real debut anywhere in the export is 2022), so without these
+    // a reader opening the default year would never see the notice work. They
+    // are only used when the year has no real find, only for LATEST_YEAR, and
+    // they are labelled "Sample data" on the strip - the same treatment
+    // orders.html gives its sample product figures. Both name real types that
+    // raised claims in 2026, so the deep link lands on real rows rather than an
+    // empty table; when a genuine new type arrives these step aside on their
+    // own, because the real list is checked first.
+    const MOCK_NEW_TYPES = [
+      { ty: 'Wrong Customer Account', date: '2026-03-17 00:00:00.000' },
+      { ty: 'Cancellation Due To Lead Time (Ns Or Need Stock)', date: '2026-06-04 00:00:00.000' }
+    ];
+    function newTypesIn(y) {
+      const m = firstSeenByType();
+      let firstYear = '9999';
+      m.forEach((e) => { if (e.year < firstYear) firstYear = e.year; });
+      if (String(y) <= firstYear) return [];
+      const counts = {};
+      CLAIMS.forEach((c) => {
+        if (!c.ty || !canSee(c.own) || String(c.date || '').slice(0, 4) !== String(y)) return;
+        counts[c.ty] = (counts[c.ty] || 0) + 1;
+      });
+      const out = [];
+      m.forEach((e, ty) => {
+        if (e.year === String(y) && counts[ty]) out.push({ ty, date: e.date, n: counts[ty] });
+      });
+      out.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.ty.localeCompare(b.ty));
+      if (out.length) return out;
+      if (String(y) !== String(LATEST_YEAR)) return [];
+      return MOCK_NEW_TYPES
+        .filter((t) => counts[t.ty])
+        .map((t) => ({ ty: t.ty, date: t.date, n: counts[t.ty], mock: true }));
+    }
+
+    // The moving notice at the top of the page. It exists only while there is
+    // something to say: a claim type the portal has never seen is worth a
+    // glance, but it is a notice rather than a metric, so it runs once above
+    // the stat line and is deliberately not given a card, a tile or a seat in
+    // the Needs Attention feed. Each item deep-links into the claims table
+    // already filtered to that type and year.
+    function typeTicker() {
+      const items = newTypesIn(year);
+      if (!items.length) return '';
+      const one = items.map((t) => {
+        const when = t.date
+          ? `first raised ${MONTHS[+t.date.slice(5, 7) - 1]} ${t.date.slice(0, 4)}`
+          : `raised in ${year}`;
+        return `<a class="tk-i" href="${claimsHref({ ty: t.ty, yr: String(year) })}" title="Open ${esc(t.ty)} claims in the table"><b>${esc(t.ty)}</b><span>${when} · ${num(t.n)} claim${t.n === 1 ? '' : 's'}</span></a>`;
+      }).join('');
+      // Two identical segments, so a -50% translate lands exactly on the seam
+      // and the loop is continuous; the second is hidden from screen readers,
+      // which would otherwise announce every item twice. The Sample data pill
+      // rides beside the label whenever the list is the mock, so nobody reads
+      // a stand-in entry as a real flag - the same badge orders.html uses for
+      // its sample product figures.
+      const isMock = items.some((t) => t.mock);
+      return (
+        `<div class="ticker" role="status" aria-label="${items.length} new claim type${items.length === 1 ? '' : 's'} in ${year}">` +
+        `<span class="tk-l">New claim type${items.length === 1 ? '' : 's'}</span>` +
+        (isMock ? `<span class="b Med tk-m" title="The export carries no brand-new claim type in ${year} yet, so these are stand-in entries showing how the notice works.">Sample data</span>` : '') +
+        `<div class="tk-w"><div class="tk-t">` +
+        `<span class="tk-seg">${one}</span><span class="tk-seg" aria-hidden="true">${one}</span>` +
+        `</div></div></div>`
+      );
+    }
+
     // Reporting-year dropdown, same open/close behaviour as the nav menu.
     function yearMenu(btn) {
       const dd = btn.closest('.dropdown');
@@ -837,7 +937,6 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         inMonths: ms.slice(0, n).filter((v) => v > 0).length,
         total: ms.slice(0, n).reduce((a, b) => a + b, 0)
       }));
-      const creditOf = (t) => (S.types.find((x) => x[0] === t) || [, 0, 0])[2];
       // S.types is ordered by count, not money. Ranking it again by credit is
       // what makes "high-value" mean valuable rather than merely frequent.
       const byValue = S.types.filter((t) => t[0] !== '(Unclassified)' && t[2] > 0).slice().sort((a, b) => b[2] - a[2]);
@@ -865,7 +964,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         out.push({
           src: 'ai', prio: 1, w: 1, n: c.total, kind: 'ty', value: c.t,
           label: 'Recurring issue',
-          v: `${c.t} in ${c.inMonths} of ${n} months · ${usd(creditOf(c.t))} credit`,
+          v: `${c.t} · ${c.inMonths}/${n} months`,
           go: 'Investigate pattern',
           why: `Every claim of this type raised in ${year}, counted off the monthly series. It appears in all ${c.inMonths} months the year has run to, which is what separates a standing fault from a one-off incident - a type that turned up in three months and then stopped would not qualify.`,
           link: { label: 'View in table', q: { ty: c.t } }
@@ -880,7 +979,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         out.push({
           src: 'ai', prio: 2, w: 4, n: t[1], kind: 'ty', value: t[0],
           label: 'High-value impact',
-          v: `${t[0]} · ${usd(t[2])} · ${pct(t[2], S.credit)} of credit`,
+          v: `${t[0]} · ${usd(t[2])}`,
           go: 'Investigate pattern',
           why: `The claim type carrying the most credit in ${year}, after ranking the whole year by money rather than by count - the type list is sorted by volume, so re-ranking it is what makes "high value" mean valuable instead of merely frequent. The number on the card is its claim count; the money is why it is here.`,
           link: { label: 'View in table', q: { ty: t[0] } }
@@ -906,7 +1005,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         out.push({
           src: 'ai', prio: 3, w: 7, n: g.total, kind: 'ty', value: g.t,
           label: 'Emerging trend',
-          v: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)} a month · ${usd(creditOf(g.t))} credit`,
+          v: `${g.t} · ${g.head.toFixed(0)} → ${g.tail.toFixed(0)}/mo`,
           go: 'Investigate pattern',
           why: `The type whose last three months average at least 1.5x its first three, on at least ${num(g.total)} claims for the year and at least ${g.tail.toFixed(0)} a month at the tail. Both floors are load-bearing: without them a 3 → 9 a month wobble across twenty claims gets dressed up as a trend.`,
           link: { label: 'View in table', q: { ty: g.t } }
@@ -929,7 +1028,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         out.push({
           src: 'ai', prio: 2, w: 5, n: byOpen[topOpen], kind: 'ty', value: topOpen,
           label: 'Potential CAPA',
-          v: `${topOpen} is the biggest open pile · ${num(S.capaFilled)} of ${num(S.total)} carry a corrective action`,
+          v: `${topOpen} · ${num(S.capaFilled)}/${num(S.total)} with CAPA`,
           go: 'Start CAPA review',
           why: `The claim type holding the largest pile of claims that still need work in ${year}. It is a prompt to start a corrective action, not a finding that a cause is already known: nothing in this export records one, and the pop-up says how few claims carry any at all.`,
           link: { label: 'View in table', q: { ty: topOpen } }
@@ -950,7 +1049,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
       add({
         src: 'metric', prio: 1, w: 3, n: S.unfinished, kind: 'reason', value: 'Entry not finished',
         label: 'Awaiting action',
-        v: `${pct(S.unfinished, S.total)} of intake · entry not marked finished`,
+        v: `${pct(S.unfinished, S.total)} of intake`,
         go: 'Review entries',
         why: `Claims raised in ${year} whose ClaimEntryFinished field is not 1 - somebody opened the entry and did not close it out. It counts the whole year rather than only what is still open, so a claim closed since still shows up here.`,
         // claims.html has an "Entry" filter ('fin') for exactly this field, so the
@@ -963,7 +1062,7 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
       add({
         src: 'metric', prio: 2, w: 6, n: S.repeatClaims, kind: 'reason', value: 'Repeat-claim order',
         label: 'Repeat-claim orders',
-        v: `${num(S.repeatOrders)} orders hit twice · ${usd(S.repeatCredit)} credit`,
+        v: `${num(S.repeatOrders)} orders hit twice`,
         go: 'Review orders',
         why: `Claims raised in ${year} against an OrderID that raised more than one claim anywhere in the whole 2010-2026 file, not just ${year} - so an order claimed against in two different years still counts. A repeat claim is usually one problem entered twice.`,
         link: { label: 'View orders', page: 'orders.html' }
@@ -1006,19 +1105,18 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
         </div>`;
     };
 
-    // One grid, one sort. Two headers that used to sit here are both gone. The
-    // first split AI cards from metric cards, which the feed no longer
-    // distinguishes in its ordering. The second was a legend for the three
-    // priority tiers, which every card already labels for itself.
+    // One grid, one sort. The section header lives here now rather than in
+    // render(), because the count belongs to it: the size of the pile is the
+    // first thing a reader wants, and it sits on the same line as the heading
+    // instead of being a card they have to count. The badge turns red as soon
+    // as there is anything at all to review.
     function renderFindings() {
       const all = buildActions();
-      if (!all.length) return `<p class="mu">Nothing outstanding ${liveYear() ? 'this year' : `in ${year}`}.</p>`;
-      // Nothing sits above the grid any more. That row carried the priority-tier
-      // legend first, then the card count once the legend was removed - a key to
-      // three tiers that every card already labels for itself, followed by a
-      // count of the cards directly below it. The tier still decides the sort
-      // order; that behaviour is untouched.
-      return `<div class="grid g3">${all.map(actCard).join('')}</div>`;
+      const badge = `<span class="b ${all.length ? 'High' : 'Low'}">${all.length} to review</span>`;
+      if (!all.length) {
+        return sect('Needs Attention', '', badge) + `<p class="mu">Nothing outstanding ${liveYear() ? 'this year' : `in ${year}`}.</p>`;
+      }
+      return sect('Needs Attention', '', badge) + `<div class="grid g3">${all.map(actCard).join('')}</div>`;
     }
 
 // ---------- the detail pop-up ----------
@@ -1293,6 +1391,10 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
           <button class="btn" onclick="toast('Dashboard refreshed')">↻ Refresh</button>
         </div>
 
+        <!-- moving notice; renders only when the year carries a claim type the
+             export has never seen before, so an ordinary year shows nothing -->
+        ${typeTicker()}
+
         <div class="stats">
           ${statLine.map(([label, value, note]) => `
             <div class="stat">
@@ -1302,7 +1404,6 @@ if (!data.length) return `<p class="mu">No claims ${liveYear() ? 'in this year' 
             </div>`).join('')}
         </div>
 
-        ${sect('Needs Attention', 'Patterns and metrics, most urgent first', '')}
         ${renderFindings()}
 
         <div class="split"></div>
